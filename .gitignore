@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+
+# Data files
+*.csv
+*.png
+
+# Conda/Virtual environments
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
