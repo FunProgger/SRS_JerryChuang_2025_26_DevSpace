@@ -10,7 +10,9 @@ The script performs the following operations:
 - Filters out rows marked with asterisks in skip_lvm or skip_rvm columns
 - Separates data by patient name and computes volume/mass statistics
 - Generates dual-axis plots showing volume and myocardial mass with error bands
-- Conducts quality assessment of measurements based on ±5% error tolerance
+- Plots variation of points from the mean for LVM and RVM measurements
+- Conducts quality assessment of measurements based on ±10% error tolerance
+- Generates a separate cross-patient standard deviation tracking plot
 - Saves plots and generates a quality assessment summary CSV
 
 Parameters
@@ -44,13 +46,17 @@ Expected columns in input CSV files:
 
 Output
 ------
-Plots
-    PNG files named {patient}_vol_time_plot.png containing:
-    - Left panel: LV volume (primary axis) and LV myocardial mass (secondary axis)
-    - Right panel: RV volume (primary axis) and RV myocardial mass (secondary axis)
-    - Error bands: ±5% deviation bands based on end-diastolic mass measurements
-Quality Assessment
-    CSV file named quality_assessment_{timestamp}.csv with columns:
+Individual Patient Plots (PNG)
+    Files named {patient}_vol_time_plot.png containing:
+    - Left panel: LV volume (left y-axis), LV myocardial mass (right y-axis),
+      and LVM deviation from mean (left y-axis, offset)
+    - Right panel: RV volume (left y-axis), RV myocardial mass (right y-axis),
+      and RVM deviation from mean (left y-axis, offset)
+    - Error bands: ±10% deviation bands based on end-diastolic mass measurements
+    - Connected deviation plots showing how each measurement deviates from the mean
+
+Quality Assessment (CSV)
+    File named quality_assessment_{timestamp}.csv with columns:
     - name : str
         Patient identifier
     - lvm : str
@@ -59,11 +65,32 @@ Quality Assessment
         Quality assessment ('good' or 'bad') for RV mass measurements
     - Summary statistics of assessment results
 
+Standard Deviation Tracking Plot (PNG)
+    Separate image file (std_dev_tracking_{timestamp}.png) showing:
+    - Left panel: LVM standard deviation for each patient (green bars)
+    - Right panel: RVM standard deviation for each patient (red bars)
+    - Mean lines showing average standard deviation across all patients
+    - Value labels on each bar for precise tracking
+
+Patient Statistics (CSV)
+    File named patient_statistics_{timestamp}.csv with columns:
+    - patient : str
+        Patient identifier
+    - lvm_mean : float
+        Mean LVM value for the patient
+    - lvm_std : float
+        Standard deviation of LVM measurements
+    - rvm_mean : float
+        Mean RVM value for the patient
+    - rvm_std : float
+        Standard deviation of RVM measurements
+
 Notes
 -----
-- Error band tolerance is fixed at ±5% (ERROR_BAND = 0.05)
+- Error band tolerance is fixed at ±10% (ERROR_BAND = 0.10)
 - Quality is marked 'bad' if any measurement falls outside the error band
 - End-diastolic (ED) mass measurements (first frame) serve as reference values
+- Deviation plots connect points with lines to show trends over time
 - Plots are saved at 300 DPI resolution with tight layout
 
 Examples
@@ -74,7 +101,7 @@ Basic usage::
 
 With custom output directory::
 
-    python automate_vol_time_plot.py -mdir /path/to/csv_directory -o /output/path
+    python automate_vol_time_plot.py -mdir C:/Users/jchu579/Documents/SRS 2025_26/bivme-data -o C:/output/path
 """
 
 import pandas as pd 
