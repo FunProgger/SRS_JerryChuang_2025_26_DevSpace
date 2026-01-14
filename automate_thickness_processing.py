@@ -3,8 +3,168 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from skimage import measure
+import argparse
+import os
+import csv
+from pathlib import Path
+from datetime import datetime
 
-def inspect_nifti(file_path):
+def setup_argparse():
+    """
+    Set up command line argument parser for thickness processing.
+    
+    Returns
+    -------
+    argparse.Namespace
+        Parsed command line arguments with attributes:
+        - output_dir: Output directory for CSV and plots
+        - model_dir: Model directory containing thickness files
+    """
+    parser = argparse.ArgumentParser(
+        description='Process NIfTI thickness files and generate summary statistics and plots.'
+    )
+    parser.add_argument(
+        '-o', '--output_dir',
+        dest='output_dir',
+        required=True,
+        help='Output directory for generated CSV and plots'
+    )
+    parser.add_argument(
+        '-mdir', '--model_dir',
+        dest='model_dir',
+        required=True,
+        help='Model directory containing thickness NIfTI files'
+    )
+    return parser.parse_args()
+
+def create_output_folder(output_dir):
+    """
+    Create a timestamped folder within the output directory.
+    
+    Parameters
+    ----------
+    output_dir : str
+        Base output directory path
+    
+    Returns
+    -------
+    str
+        Path to the newly created timestamped folder
+    """
+    # Create timestamp for folder name
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamped_folder = os.path.join(output_dir, f"thickness_analysis_{timestamp}")
+    
+    # Create the folder
+    os.makedirs(timestamped_folder, exist_ok=True)
+    print(f"\n✓ Created output folder: {timestamped_folder}")
+    
+    return timestamped_folder
+
+def locate_thickness_files(model_dir):
+    """
+    Recursively search for thickness files in model directory.
+    
+    Searches for files matching the pattern:
+    - rv_thickness_[folder_name]_[frame].nii
+    - lv_thickness_[folder_name]_[frame].nii
+    
+    Parameters
+    ----------
+    model_dir : str
+        Path to the model directory to search
+    
+    Returns
+    -------
+    dict
+        Dictionary mapping file paths to (thickness_type, folder_name, frame) tuples
+        thickness_type: 'rv' or 'lv'
+        folder_name: Name of the patient folder
+        frame: Frame number
+    """
+    thickness_files = {}
+    
+    for root, dirs, files in os.walk(model_dir):
+        for file in files:
+            if file.endswith('.nii') or file.endswith('.nii.gz'):
+                # Check for rv_thickness pattern
+                if file.startswith('rv_thickness_') and file.count('_') >= 2:
+                    parts = file.replace('.nii.gz', '').replace('.nii', '').split('_')
+                    if len(parts) >= 4:
+                        folder_name = parts[2]
+                        frame = parts[3]
+                        file_path = os.path.join(root, file)
+                        thickness_files[file_path] = ('rv', folder_name, frame)
+                        continue
+                
+                # Check for lv_thickness pattern
+                if file.startswith('lv_thickness_') and file.count('_') >= 2:
+                    parts = file.replace('.nii.gz', '').replace('.nii', '').split('_')
+                    if len(parts) >= 4:
+                        folder_name = parts[2]
+                        frame = parts[3]
+                        file_path = os.path.join(root, file)
+                        thickness_files[file_path] = ('lv', folder_name, frame)
+                        continue
+    
+    return thickness_files
+
+def inspect_nifti(file_path, return_stats=False):
+    """
+    Analyze and visualize left ventricle wall thickness from NIfTI medical imaging files.
+    
+    This function loads a NIfTI format thickness map and generates comprehensive analysis
+    including statistics, distribution histograms, and spatial visualization of thickness
+    values across multiple slices.
+    
+    Parameters
+    ----------
+    file_path : str
+        Absolute path to the NIfTI file (.nii or .nii.gz format) containing left ventricle
+        wall thickness data in millimeters.
+    return_stats : bool, optional
+        If True, return statistics dictionary instead of displaying plot. Default is False.
+    
+    Returns
+    -------
+    dict or None
+        If return_stats is True, returns dictionary with keys:
+        - 'avg_thickness': Average thickness in mm
+        - 'min_thickness': Minimum thickness in mm
+        - 'max_thickness': Maximum thickness in mm
+        Otherwise returns None and displays matplotlib visualization.
+    
+    Analysis Components
+    -------------------
+    1. File Properties: Loads NIfTI header, dimensions, voxel sizes, and affine matrix
+    2. Data Statistics: Identifies unique thickness values, excludes background (0) and NaN
+    3. Global Extrema: Finds maximum, minimum, and average thickness with 3D coordinates
+    4. Visualizations:
+       - Histogram of thickness distribution across all voxels
+    
+    Output
+    ------
+    Prints to console:
+        - Global maximum thickness value, location (X, Y, slice)
+        - Global minimum thickness value, location (X, Y, slice)
+        - Global average thickness value, location (X, Y, slice)
+        - Middle slice statistics (min, max, average with coordinates)
+        - Summary statistics (min, max, mean thickness, voxel count)
+    
+    Displays matplotlib figure:
+        - Histogram of thickness distribution
+    
+    Notes
+    -----
+    - Background voxels with value 0 are excluded from analysis
+    - NaN values are filtered out before computing statistics
+    - Coordinates are in (X, Y, slice) format where X and Y are voxel indices
+    - Thickness values are in millimeters (mm)
+    
+    Examples
+    --------
+    >>> inspect_nifti("patient1/lv_thickness_patient1_002.nii")
+    """
     # 1. Load the file
     img = nib.load(file_path)
     header = img.header
@@ -58,97 +218,6 @@ def inspect_nifti(file_path):
     print(f"\nGlobal Average Thickness: {avg_thickness:.2f} mm")
     print(f"  Location: X={avg_loc[1]}, Y={avg_loc[0]}, Slice={avg_slice}")
     
-    
-    # Create a figure with custom grid layout
-    # Top row: Histogram (left) | Middle slice (right)
-    # Bottom row: Min slice (left) | Max slice (middle) | Average slice (right)
-    fig = plt.figure(figsize=(20, 10))
-    gs = fig.add_gridspec(2, 3, hspace=0.3, wspace=0.3)
-    
-    ax1 = fig.add_subplot(gs[0, 0])  # Histogram - top left
-    ax2 = fig.add_subplot(gs[0, 1:])  # Middle slice - top right (spans 2 columns)
-    ax3 = fig.add_subplot(gs[1, 0])  # Min slice - bottom left
-    ax4 = fig.add_subplot(gs[1, 1])  # Max slice - bottom middle
-    ax5 = fig.add_subplot(gs[1, 2])  # Average slice - bottom right
-    
-    
-    # Histogram
-    ax1.hist(valid_data, bins=100, edgecolor='black', alpha=0.7, color='blue')
-    ax1.set_xlabel('Thickness (mm)')
-    ax1.set_ylabel('Number of Voxels')
-    ax1.set_title('Histogram: Distribution of Left Ventricle Wall Thickness')
-    ax1.grid(True, alpha=0.3)
-    
-    # Middle slice with min, max, and average
-    mid_slice = data.shape[2] // 2
-    mid_slice_data = data[:, :, mid_slice]
-    
-    # Find min and max in middle slice
-    mid_slice_valid = mid_slice_data[mid_slice_data > 0]
-    mid_max = np.nanmax(mid_slice_data)
-    mid_min = np.nanmin(mid_slice_valid)
-    mid_avg = np.nanmean(mid_slice_valid)
-    
-    # Find locations in middle slice
-    mid_max_loc = np.unravel_index(np.nanargmax(mid_slice_data), mid_slice_data.shape)
-    mid_min_loc = np.unravel_index(np.nanargmin(np.ma.masked_where(mid_slice_data <= 0, mid_slice_data)), mid_slice_data.shape)
-    
-    # Find closest voxel to average
-    mid_avg_loc = np.unravel_index(np.nanargmin(np.abs(mid_slice_data - mid_avg)), mid_slice_data.shape)
-    
-    im_mid = ax2.imshow(mid_slice_data, cmap='viridis', origin='lower')
-    ax2.set_xlabel('X (voxels)')
-    ax2.set_ylabel('Y (voxels)')
-    ax2.set_title(f'Middle Slice {mid_slice} with Min, Max, and Average')
-    ax2.plot(mid_max_loc[1], mid_max_loc[0], 'r^', markersize=8, label=f'Max: {mid_max:.2f} mm')
-    ax2.plot(mid_min_loc[1], mid_min_loc[0], 'bv', markersize=8, label=f'Min: {mid_min:.2f} mm')
-    ax2.plot(mid_avg_loc[1], mid_avg_loc[0], 'gs', markersize=8, label=f'Avg: {mid_avg:.2f} mm')
-    ax2.legend(loc='upper right')
-    cbar_mid = plt.colorbar(im_mid, ax=ax2)
-    cbar_mid.set_label('Thickness (mm)')
-    
-    # Heatmap of max slice
-    max_slice_data = data[:, :, max_slice]
-    im2 = ax3.imshow(max_slice_data, cmap='viridis', origin='lower')
-    ax3.set_xlabel('X (voxels)')
-    ax3.set_ylabel('Y (voxels)')
-    ax3.set_title(f'Max Thickness at Slice {max_slice}')
-    ax3.plot(max_loc[1], max_loc[0], 'r^', markersize=8, label=f'Max: {max_thickness:.2f} mm')
-    ax3.legend(loc='upper right')
-    cbar2 = plt.colorbar(im2, ax=ax3)
-    cbar2.set_label('Thickness (mm)')
-    
-    # Heatmap of min slice
-    min_slice_data = data[:, :, min_slice]
-    im3 = ax4.imshow(min_slice_data, cmap='viridis', origin='lower')
-    ax4.set_xlabel('X (voxels)')
-    ax4.set_ylabel('Y (voxels)')
-    ax4.set_title(f'Min Thickness at Slice {min_slice}')
-    ax4.plot(min_loc[1], min_loc[0], 'bv', markersize=8, label=f'Min: {min_thickness:.2f} mm')
-    ax4.legend(loc='upper right')
-    cbar3 = plt.colorbar(im3, ax=ax4)
-    cbar3.set_label('Thickness (mm)')
-    
-    # Heatmap of average slice
-    avg_slice_data = data[:, :, avg_slice]
-    im4 = ax5.imshow(avg_slice_data, cmap='viridis', origin='lower')
-    ax5.set_xlabel('X (voxels)')
-    ax5.set_ylabel('Y (voxels)')
-    ax5.set_title(f'Average Thickness at Slice {avg_slice}')
-    ax5.plot(avg_loc[1], avg_loc[0], 'gs', markersize=8, label=f'Avg: {avg_thickness:.2f} mm')
-    ax5.legend(loc='upper right')
-    cbar4 = plt.colorbar(im4, ax=ax5)
-    cbar4.set_label('Thickness (mm)')
-    
-    print(f"\nMiddle Slice {mid_slice} Statistics:")
-    print(f"  Max: {mid_max:.2f} mm at X={mid_max_loc[1]}, Y={mid_max_loc[0]}")
-    print(f"  Min: {mid_min:.2f} mm at X={mid_min_loc[1]}, Y={mid_min_loc[0]}")
-    print(f"  Average: {mid_avg:.2f} mm at X={mid_avg_loc[1]}, Y={mid_avg_loc[0]}")
-    
-    
-    plt.tight_layout()
-    plt.show()
-    
     # 6. Thickness Statistics
     if len(valid_data) > 0:
         print(f"Min thickness: {valid_data.min():.2f} mm")
@@ -157,8 +226,188 @@ def inspect_nifti(file_path):
         print(f"Number of voxels with thickness: {len(valid_data)}")
     else:
         print("No valid thickness data found")
+    
+    # Return statistics if requested
+    if return_stats:
+        return {
+            'avg_thickness': float(avg_thickness),
+            'min_thickness': float(min_thickness),
+            'max_thickness': float(max_thickness)
+        }
+    
+    # Create a figure with histogram only
+    fig = plt.figure(figsize=(10, 6))
+    
+    ax1 = fig.add_subplot(111)  # Histogram only
+    
+    # Histogram
+    ax1.hist(valid_data, bins=100, edgecolor='black', alpha=0.7, color='blue')
+    ax1.set_xlabel('Thickness (mm)')
+    ax1.set_ylabel('Number of Voxels')
+    ax1.set_title('Histogram: Distribution of Left Ventricle Wall Thickness')
+    ax1.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()
+
+def generate_summary_csv(thickness_files, output_dir):
+    """
+    Generate summary CSV file from thickness files.
+    
+    Parameters
+    ----------
+    thickness_files : dict
+        Dictionary from locate_thickness_files() containing file paths and metadata
+    output_dir : str
+        Output directory for the CSV file
+    
+    Returns
+    -------
+    str
+        Path to the generated CSV file
+    pandas.DataFrame
+        DataFrame containing the summary statistics
+    """
+    import pandas as pd
+    
+    summary_data = []
+    
+    print(f"\nProcessing {len(thickness_files)} thickness files...")
+    
+    for file_path, (thickness_type, folder_name, frame) in thickness_files.items():
+        try:
+            stats = inspect_nifti(file_path, return_stats=True)
+            if stats:
+                summary_data.append({
+                    'folder_name': folder_name,
+                    'frame': frame,
+                    'thickness_type': thickness_type,
+                    'avg_thickness': stats['avg_thickness'],
+                    'min_thickness': stats['min_thickness'],
+                    'max_thickness': stats['max_thickness']
+                })
+                print(f"✓ Processed {thickness_type} {folder_name} frame {frame}")
+        except Exception as e:
+            print(f"✗ Error processing {file_path}: {str(e)}")
+    
+    # Create DataFrame
+    df = pd.DataFrame(summary_data)
+    
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Save CSV file
+    csv_path = os.path.join(output_dir, 'summary_thickness.csv')
+    df.to_csv(csv_path, index=False)
+    print(f"\n✓ Summary CSV saved to {csv_path}")
+    
+    return csv_path, df
+
+def generate_sd_plot(summary_df, output_dir):
+    """
+    Generate standard deviation plot for thickness statistics.
+    
+    Creates a plot showing standard deviations of avg_thickness, min_thickness,
+    and max_thickness for each folder, with dashed lines indicating the average
+    of each statistic.
+    
+    Parameters
+    ----------
+    summary_df : pandas.DataFrame
+        DataFrame from generate_summary_csv() with thickness statistics
+    output_dir : str
+        Output directory for the plot
+    
+    Returns
+    -------
+    str
+        Path to the saved plot
+    """
+    # Group by folder_name and calculate statistics
+    grouped = summary_df.groupby('folder_name')[['avg_thickness', 'min_thickness', 'max_thickness']].agg(['mean', 'std'])
+    
+    # Calculate overall averages
+    overall_avg_avg = summary_df['avg_thickness'].mean()
+    overall_avg_min = summary_df['min_thickness'].mean()
+    overall_avg_max = summary_df['max_thickness'].mean()
+    
+    # Calculate overall standard deviations
+    overall_sd_avg = summary_df['avg_thickness'].std()
+    overall_sd_min = summary_df['min_thickness'].std()
+    overall_sd_max = summary_df['max_thickness'].std()
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=(12, 7))
+    
+    folder_names = grouped.index.tolist()
+    x_pos = np.arange(len(folder_names))
+    width = 0.25
+    
+    # Extract standard deviations for each metric
+    sd_avg = grouped[('avg_thickness', 'std')].values
+    sd_min = grouped[('min_thickness', 'std')].values
+    sd_max = grouped[('max_thickness', 'std')].values
+    
+    # Plot bars
+    bars1 = ax.bar(x_pos - width, sd_avg, width, label='SD (Avg Thickness)', alpha=0.8)
+    bars2 = ax.bar(x_pos, sd_min, width, label='SD (Min Thickness)', alpha=0.8)
+    bars3 = ax.bar(x_pos + width, sd_max, width, label='SD (Max Thickness)', alpha=0.8)
+    
+    # Add dashed lines for overall averages
+    ax.axhline(y=overall_sd_avg, color='C0', linestyle='--', linewidth=2, alpha=0.7, label=f'Avg SD (Avg): {overall_sd_avg:.3f}')
+    ax.axhline(y=overall_sd_min, color='C1', linestyle='--', linewidth=2, alpha=0.7, label=f'Avg SD (Min): {overall_sd_min:.3f}')
+    ax.axhline(y=overall_sd_max, color='C2', linestyle='--', linewidth=2, alpha=0.7, label=f'Avg SD (Max): {overall_sd_max:.3f}')
+    
+    # Customize plot
+    ax.set_xlabel('Folder Name', fontsize=12)
+    ax.set_ylabel('Standard Deviation (mm)', fontsize=12)
+    ax.set_title('Standard Deviation of Thickness Metrics by Folder', fontsize=14, fontweight='bold')
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(folder_names, rotation=45, ha='right')
+    ax.legend(loc='upper left', fontsize=10)
+    ax.grid(True, alpha=0.3, axis='y')
+    
+    plt.tight_layout()
+    
+    # Save plot
+    os.makedirs(output_dir, exist_ok=True)
+    plot_path = os.path.join(output_dir, 'sd_plot_thickness.png')
+    plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+    print(f"\n✓ SD plot saved to {plot_path}")
+    
+    plt.show()
+    return plot_path
+
+def main():
+    """
+    Main function to orchestrate thickness processing pipeline.
+    """
+    # Parse arguments
+    args = setup_argparse()
+    
+    # Create timestamped output folder
+    output_folder = create_output_folder(args.output_dir)
+    
+    # Locate thickness files
+    print(f"Searching for thickness files in {args.model_dir}...")
+    thickness_files = locate_thickness_files(args.model_dir)
+    
+    if not thickness_files:
+        print("No thickness files found!")
+        return
+    
+    print(f"Found {len(thickness_files)} thickness files")
+    
+    # Generate summary CSV
+    csv_path, summary_df = generate_summary_csv(thickness_files, output_folder)
+    
+    # Generate SD plot
+    generate_sd_plot(summary_df, output_folder)
+    
+    print("\n✓ Processing complete!")
 
 # Run the function
 # inspect_nifti("C:\Users\\jchu579\\Documents\\SRS 2025_26\\biv-me-dev\\src\\bivme\\analysis\\example_thickness\\patient1\\lv_thickness_patient1_000.nii")
 # inspect_nifti("C:\\Users\\jchu579\\Documents\\SRS 2025_26\\biv-me-dev\\src\\bivme\\analysis\\example_thickness\\patient1\\lv_thickness_patient1_001.nii")
-inspect_nifti("C:\\Users\\jchu579\\Documents\\SRS 2025_26\\biv-me-dev\\src\\bivme\\analysis\\example_thickness\\patient1\\lv_thickness_patient1_002.nii")
+if __name__ == "__main__":
+    main()
