@@ -109,7 +109,7 @@ def locate_thickness_files(model_dir):
     
     return thickness_files
 
-def inspect_nifti(file_path, return_stats=False):
+def inspect_nifti(file_path, return_stats=False, verbose=True):
     """
     Analyze and visualize left ventricle wall thickness from NIfTI medical imaging files.
     
@@ -171,26 +171,23 @@ def inspect_nifti(file_path, return_stats=False):
     data = img.get_fdata()
     affine = img.affine
 
-    print(f"--- File Inspection: {file_path} ---")
-    
-    # 2. Dimensions and Resolution
-    print(f"Shape: {data.shape}") # e.g., (256, 256, 120)
-    print(f"Voxel Sizes (mm): {header.get_zooms()}")
-    
-    # 3. Label Check
-    unique_labels = np.unique(data)
-    print(f"Unique Label Values found: {unique_labels}")
-    
-    # Print full array without truncation
-    # np.set_printoptions(threshold=np.inf, suppress=True)
-    # print(f"\nFull Unique Values:\n{unique_labels}")
-    
-    # 4. Spatial Orientation (The Affine)
-    print("\nAffine Matrix (Voxel -> MM mapping):")
-    print(affine)
+    if verbose:
+        print(f"--- File Inspection: {file_path} ---")
+        
+        # 2. Dimensions and Resolution
+        print(f"Shape: {data.shape}") # e.g., (256, 256, 120)
+        print(f"Voxel Sizes (mm): {header.get_zooms()}")
+        
+        # 3. Label Check
+        unique_labels = np.unique(data)
+        print(f"Unique Label Values found: {unique_labels}")
+        
+        # 4. Spatial Orientation (The Affine)
+        print("\nAffine Matrix (Voxel -> MM mapping):")
+        print(affine)
 
-    # 5. Plot All Thickness Data
-    print("\nPlotting thickness distribution...")
+        # 5. Plot All Thickness Data
+        print("\nPlotting thickness distribution...")
     valid_data = data[data > 0]  # Exclude 0 and background
     valid_data = valid_data[~np.isnan(valid_data)]  # Exclude NaN values
     
@@ -211,21 +208,22 @@ def inspect_nifti(file_path, return_stats=False):
     min_slice = min_loc[2]
     avg_slice = avg_loc[2]
     
-    print(f"\nGlobal Maximum Thickness: {max_thickness:.2f} mm")
-    print(f"  Location: X={max_loc[1]}, Y={max_loc[0]}, Slice={max_slice}")
-    print(f"\nGlobal Minimum Thickness: {min_thickness:.2f} mm")
-    print(f"  Location: X={min_loc[1]}, Y={min_loc[0]}, Slice={min_slice}")
-    print(f"\nGlobal Average Thickness: {avg_thickness:.2f} mm")
-    print(f"  Location: X={avg_loc[1]}, Y={avg_loc[0]}, Slice={avg_slice}")
-    
-    # 6. Thickness Statistics
-    if len(valid_data) > 0:
-        print(f"Min thickness: {valid_data.min():.2f} mm")
-        print(f"Max thickness: {valid_data.max():.2f} mm")
-        print(f"Mean thickness: {valid_data.mean():.2f} mm")    
-        print(f"Number of voxels with thickness: {len(valid_data)}")
-    else:
-        print("No valid thickness data found")
+    if verbose:
+        print(f"\nGlobal Maximum Thickness: {max_thickness:.2f} mm")
+        print(f"  Location: X={max_loc[1]}, Y={max_loc[0]}, Slice={max_slice}")
+        print(f"\nGlobal Minimum Thickness: {min_thickness:.2f} mm")
+        print(f"  Location: X={min_loc[1]}, Y={min_loc[0]}, Slice={min_slice}")
+        print(f"\nGlobal Average Thickness: {avg_thickness:.2f} mm")
+        print(f"  Location: X={avg_loc[1]}, Y={avg_loc[0]}, Slice={avg_slice}")
+        
+        # 6. Thickness Statistics
+        if len(valid_data) > 0:
+            print(f"Min thickness: {valid_data.min():.2f} mm")
+            print(f"Max thickness: {valid_data.max():.2f} mm")
+            print(f"Mean thickness: {valid_data.mean():.2f} mm")    
+            print(f"Number of voxels with thickness: {len(valid_data)}")
+        else:
+            print("No valid thickness data found")
     
     # Return statistics if requested
     if return_stats:
@@ -272,11 +270,9 @@ def generate_summary_csv(thickness_files, output_dir):
     
     summary_data = []
     
-    print(f"\nProcessing {len(thickness_files)} thickness files...")
-    
     for file_path, (thickness_type, folder_name, frame) in thickness_files.items():
         try:
-            stats = inspect_nifti(file_path, return_stats=True)
+            stats = inspect_nifti(file_path, return_stats=True, verbose=True)
             if stats:
                 summary_data.append({
                     'folder_name': folder_name,
@@ -286,9 +282,8 @@ def generate_summary_csv(thickness_files, output_dir):
                     'min_thickness': stats['min_thickness'],
                     'max_thickness': stats['max_thickness']
                 })
-                print(f"✓ Processed {thickness_type} {folder_name} frame {frame}")
         except Exception as e:
-            print(f"✗ Error processing {file_path}: {str(e)}")
+            pass
     
     # Create DataFrame
     df = pd.DataFrame(summary_data)
@@ -305,11 +300,11 @@ def generate_summary_csv(thickness_files, output_dir):
 
 def generate_sd_plot(summary_df, output_dir):
     """
-    Generate standard deviation plot for thickness statistics.
+    Generate standard deviation plots for thickness statistics.
     
-    Creates a plot showing standard deviations of avg_thickness, min_thickness,
-    and max_thickness for each folder, with dashed lines indicating the average
-    of each statistic.
+    Creates side-by-side plots showing standard deviations of avg_thickness, min_thickness,
+    and max_thickness for each folder, separated by RV and LV, with dashed lines 
+    indicating the average of each statistic.
     
     Parameters
     ----------
@@ -323,49 +318,70 @@ def generate_sd_plot(summary_df, output_dir):
     str
         Path to the saved plot
     """
-    # Group by folder_name and calculate statistics
-    grouped = summary_df.groupby('folder_name')[['avg_thickness', 'min_thickness', 'max_thickness']].agg(['mean', 'std'])
+    # Create figure with 2 subplots
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 7))
+    axes = [ax1, ax2]
+    thickness_types = ['rv', 'lv']
     
-    # Calculate overall averages
-    overall_avg_avg = summary_df['avg_thickness'].mean()
-    overall_avg_min = summary_df['min_thickness'].mean()
-    overall_avg_max = summary_df['max_thickness'].mean()
-    
-    # Calculate overall standard deviations
-    overall_sd_avg = summary_df['avg_thickness'].std()
-    overall_sd_min = summary_df['min_thickness'].std()
-    overall_sd_max = summary_df['max_thickness'].std()
-    
-    # Create figure
-    fig, ax = plt.subplots(figsize=(12, 7))
-    
-    folder_names = grouped.index.tolist()
-    x_pos = np.arange(len(folder_names))
-    width = 0.25
-    
-    # Extract standard deviations for each metric
-    sd_avg = grouped[('avg_thickness', 'std')].values
-    sd_min = grouped[('min_thickness', 'std')].values
-    sd_max = grouped[('max_thickness', 'std')].values
-    
-    # Plot bars
-    bars1 = ax.bar(x_pos - width, sd_avg, width, label='SD (Avg Thickness)', alpha=0.8)
-    bars2 = ax.bar(x_pos, sd_min, width, label='SD (Min Thickness)', alpha=0.8)
-    bars3 = ax.bar(x_pos + width, sd_max, width, label='SD (Max Thickness)', alpha=0.8)
-    
-    # Add dashed lines for overall averages
-    ax.axhline(y=overall_sd_avg, color='C0', linestyle='--', linewidth=2, alpha=0.7, label=f'Avg SD (Avg): {overall_sd_avg:.3f}')
-    ax.axhline(y=overall_sd_min, color='C1', linestyle='--', linewidth=2, alpha=0.7, label=f'Avg SD (Min): {overall_sd_min:.3f}')
-    ax.axhline(y=overall_sd_max, color='C2', linestyle='--', linewidth=2, alpha=0.7, label=f'Avg SD (Max): {overall_sd_max:.3f}')
-    
-    # Customize plot
-    ax.set_xlabel('Folder Name', fontsize=12)
-    ax.set_ylabel('Standard Deviation (mm)', fontsize=12)
-    ax.set_title('Standard Deviation of Thickness Metrics by Folder', fontsize=14, fontweight='bold')
-    ax.set_xticks(x_pos)
-    ax.set_xticklabels(folder_names, rotation=45, ha='right')
-    ax.legend(loc='upper left', fontsize=10)
-    ax.grid(True, alpha=0.3, axis='y')
+    for idx, thickness_type in enumerate(thickness_types):
+        ax = axes[idx]
+        
+        # Filter data by thickness type
+        filtered_df = summary_df[summary_df['thickness_type'] == thickness_type]
+        
+        if filtered_df.empty:
+            continue
+        
+        # Group by folder_name and calculate statistics
+        grouped = filtered_df.groupby('folder_name')[['avg_thickness', 'min_thickness', 'max_thickness']].agg(['mean', 'std'])
+        
+        # Calculate overall standard deviations for this type
+        overall_sd_avg = filtered_df['avg_thickness'].std()
+        overall_sd_min = filtered_df['min_thickness'].std()
+        overall_sd_max = filtered_df['max_thickness'].std()
+        
+        folder_names = grouped.index.tolist()
+        x_pos = np.arange(len(folder_names))
+        width = 0.25
+        
+        # Extract standard deviations for each metric
+        sd_avg = grouped[('avg_thickness', 'std')].values
+        sd_min = grouped[('min_thickness', 'std')].values
+        sd_max = grouped[('max_thickness', 'std')].values
+        
+        # Plot bars
+        bars1 = ax.bar(x_pos - width, sd_avg, width, label='SD (Avg Thickness)', alpha=0.8)
+        bars2 = ax.bar(x_pos, sd_min, width, label='SD (Min Thickness)', alpha=0.8)
+        bars3 = ax.bar(x_pos + width, sd_max, width, label='SD (Max Thickness)', alpha=0.8)
+        
+        # Add dashed lines for overall averages
+        ax.axhline(y=overall_sd_avg, color='C0', linestyle='--', linewidth=2, alpha=0.7, label=f'Avg SD (Avg): {overall_sd_avg:.3f}')
+        ax.axhline(y=overall_sd_min, color='C1', linestyle='--', linewidth=2, alpha=0.7, label=f'Avg SD (Min): {overall_sd_min:.3f}')
+        ax.axhline(y=overall_sd_max, color='C2', linestyle='--', linewidth=2, alpha=0.7, label=f'Avg SD (Max): {overall_sd_max:.3f}')
+        
+        # Customize plot
+        ax.set_xlabel('Folder Name', fontsize=12)
+        ax.set_ylabel('Standard Deviation (mm)', fontsize=12)
+        ax.set_title(f'Standard Deviation of Thickness Metrics by Folder ({thickness_type.upper()})', fontsize=14, fontweight='bold')
+        ax.set_xticks(x_pos)
+        ax.set_xticklabels(folder_names, rotation=45, ha='right')
+        ax.legend(loc='upper left', fontsize=10)
+        ax.grid(True, alpha=0.3, axis='y')
+        
+        # Add secondary y-axis
+        ax2 = ax.twinx()
+        ax2.set_ylabel('Mean Thickness (mm)', fontsize=12, color='orange')
+        ax2.tick_params(axis='y', labelcolor='orange')
+        
+        # Calculate means for secondary axis
+        mean_avg = grouped[('avg_thickness', 'mean')].values
+        mean_min = grouped[('min_thickness', 'mean')].values
+        mean_max = grouped[('max_thickness', 'mean')].values
+        
+        # Plot lines on secondary axis
+        ax2.plot(x_pos - width, mean_avg, 'o-', color='C0', alpha=0.5, linewidth=2, markersize=6, label='Mean (Avg)')
+        ax2.plot(x_pos, mean_min, 's-', color='C1', alpha=0.5, linewidth=2, markersize=6, label='Mean (Min)')
+        ax2.plot(x_pos + width, mean_max, '^-', color='C2', alpha=0.5, linewidth=2, markersize=6, label='Mean (Max)')
     
     plt.tight_layout()
     
@@ -378,9 +394,112 @@ def generate_sd_plot(summary_df, output_dir):
     plt.show()
     return plot_path
 
-def main():
+def generate_feature_plots(summary_df, output_dir):
     """
+    Generate separate plots for each feature (min, max, average thickness).
+    
+    Creates three individual plots, one for each thickness feature:
+    - Average Thickness
+    - Minimum Thickness
+    - Maximum Thickness
+    
+    Each plot shows RV and LV data separated by folder name with error bars
+    representing the standard deviation.
+    
+    Parameters
+    ----------
+    summary_df : pandas.DataFrame
+        DataFrame from generate_summary_csv() with thickness statistics
+    output_dir : str
+        Output directory for the plots
+    
+    Returns
+    -------
+    list
+        List of paths to the saved plots
+    """
+    import pandas as pd
+    
+    features = ['avg_thickness', 'min_thickness', 'max_thickness']
+    feature_labels = ['Average Thickness (mm)', 'Minimum Thickness (mm)', 'Maximum Thickness (mm)']
+    plot_paths = []
+    
+    for feature, label in zip(features, feature_labels):
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+        axes = [ax1, ax2]
+        thickness_types = ['rv', 'lv']
+        
+        for idx, thickness_type in enumerate(thickness_types):
+            ax = axes[idx]
+            
+            # Filter data by thickness type
+            filtered_df = summary_df[summary_df['thickness_type'] == thickness_type]
+            
+            if filtered_df.empty:
+                ax.text(0.5, 0.5, f'No data found for {thickness_type.upper()}',
+                       horizontalalignment='center', verticalalignment='center',
+                       transform=ax.transAxes, fontsize=12)
+                ax.set_title(f'{label} - {thickness_type.upper()}', fontsize=14, fontweight='bold')
+                continue
+            
+            # Group by folder_name and calculate statistics
+            grouped = filtered_df.groupby('folder_name')[feature].agg(['mean', 'std'])
+            
+            folder_names = grouped.index.tolist()
+            x_pos = np.arange(len(folder_names))
+            
+            # Extract mean and std values
+            means = grouped['mean'].values
+            stds = grouped['std'].values
+            
+            # Calculate overall average for this feature
+            overall_avg = filtered_df[feature].mean()
+            
+            # Plot bars without error bars
+            bars = ax.bar(x_pos, means, alpha=0.7, 
+                         color='steelblue', edgecolor='black', linewidth=1.2)
+            
+            # Add horizontal line for overall average
+            ax.axhline(y=overall_avg, color='red', linestyle='--', linewidth=2, 
+                      alpha=0.7, label=f'Overall Avg: {overall_avg:.2f}')
+            
+            # Customize plot
+            ax.set_xlabel('Folder Name', fontsize=12, fontweight='bold')
+            ax.set_ylabel(label, fontsize=12, fontweight='bold')
+            ax.set_title(f'{label} - {thickness_type.upper()}', fontsize=14, fontweight='bold')
+            ax.set_xticks(x_pos)
+            ax.set_xticklabels(folder_names, rotation=45, ha='right')
+            ax.legend(loc='upper left', fontsize=10)
+            ax.grid(True, alpha=0.3, axis='y', linestyle='--')
+            
+            # Add secondary y-axis for standard deviation
+            ax2 = ax.twinx()
+            ax2.set_ylabel('Standard Deviation (mm)', fontsize=12, color='purple')
+            ax2.tick_params(axis='y', labelcolor='purple')
+            
+            # Plot standard deviation as lines on secondary axis
+            ax2.plot(x_pos, stds, 'o-', color='purple', alpha=0.6, linewidth=2, markersize=6, label='Std Dev')
+        
+        plt.tight_layout()
+        
+        # Save plot
+        os.makedirs(output_dir, exist_ok=True)
+        feature_name = feature.replace('_thickness', '')
+        plot_path = os.path.join(output_dir, f'{feature_name}_thickness_plot.png')
+        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+        print(f"✓ {label} plot saved to {plot_path}")
+        
+        plot_paths.append(plot_path)
+        plt.close()
+    
+    return plot_paths
+
+def main():
+    r"""
     Main function to orchestrate thickness processing pipeline.
+    ---
+    example usage (use forward slashes for Windows paths in command line):
+    python automate_thickness_processing.py -mdir "Z:\sandboxes\Jerry\hpc biv-me data\analysis\Tof_44cases_thickness" -o "C:\Users\jchu579\Documents\SRS 2025_26\dev_space\output_thickness"
     """
     # Parse arguments
     args = setup_argparse()
@@ -401,13 +520,13 @@ def main():
     # Generate summary CSV
     csv_path, summary_df = generate_summary_csv(thickness_files, output_folder)
     
-    # Generate SD plot
-    generate_sd_plot(summary_df, output_folder)
+    # Generate individual feature plots
+    feature_plots = generate_feature_plots(summary_df, output_folder)
     
     print("\n✓ Processing complete!")
 
 # Run the function
-# inspect_nifti("C:\Users\\jchu579\\Documents\\SRS 2025_26\\biv-me-dev\\src\\bivme\\analysis\\example_thickness\\patient1\\lv_thickness_patient1_000.nii")
-# inspect_nifti("C:\\Users\\jchu579\\Documents\\SRS 2025_26\\biv-me-dev\\src\\bivme\\analysis\\example_thickness\\patient1\\lv_thickness_patient1_001.nii")
+# inspect_nifti(r"C:\Users\jchu579\Documents\SRS 2025_26\biv-me-dev\src\bivme\analysis\example_thickness\patient1\lv_thickness_patient1_000.nii")
+# inspect_nifti(r"C:\Users\jchu579\Documents\SRS 2025_26\biv-me-dev\src\bivme\analysis\example_thickness\patient1\lv_thickness_patient1_001.nii")
 if __name__ == "__main__":
     main()
