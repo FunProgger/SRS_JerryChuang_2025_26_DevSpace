@@ -32,8 +32,16 @@ def setup_argparse():
     parser.add_argument(
         '-mdir', '--model_dir',
         dest='model_dir',
-        required=True,
+        required=False,
+        default=None,
         help='Model directory containing thickness NIfTI files'
+    )
+    parser.add_argument(
+        '-d', '--data',
+        dest='data',
+        required=False,
+        default=None,
+        help='Path to summary CSV file to generate plots from (skips CSV generation)'
     )
     return parser.parse_args()
 
@@ -269,10 +277,12 @@ def generate_summary_csv(thickness_files, output_dir):
     import pandas as pd
     
     summary_data = []
+    processed_folders = {}
+    completed_printed_folders = set()
     
     for file_path, (thickness_type, folder_name, frame) in thickness_files.items():
         try:
-            stats = inspect_nifti(file_path, return_stats=True, verbose=True)
+            stats = inspect_nifti(file_path, return_stats=True, verbose=False)
             if stats:
                 summary_data.append({
                     'folder_name': folder_name,
@@ -282,6 +292,17 @@ def generate_summary_csv(thickness_files, output_dir):
                     'min_thickness': stats['min_thickness'],
                     'max_thickness': stats['max_thickness']
                 })
+                # Track processed folders
+                if folder_name not in processed_folders:
+                    processed_folders[folder_name] = set()
+                processed_folders[folder_name].add(thickness_type)
+                
+                # Print completion status as soon as folder is done
+                if folder_name not in completed_printed_folders:
+                    types_found = processed_folders[folder_name]
+                    if 'rv' in types_found and 'lv' in types_found:
+                        print(f"✓ Completed {folder_name} (rv, lv)")
+                        completed_printed_folders.add(folder_name)
         except Exception as e:
             pass
     
@@ -494,36 +515,107 @@ def generate_feature_plots(summary_df, output_dir):
     
     return plot_paths
 
+def load_and_generate_plots(csv_path, output_dir):
+    """
+    Load summary data from CSV and generate all plots (feature plots and SD plot).
+    
+    This function skips CSV generation and only creates visualizations from existing data.
+    Useful for regenerating plots from previously generated summary CSV files.
+    
+    Parameters
+    ----------
+    csv_path : str
+        Path to the summary CSV file (must have same format as summary_thickness.csv)
+        Required columns: folder_name, frame, thickness_type, avg_thickness, min_thickness, max_thickness
+    output_dir : str
+        Output directory for the plots
+    
+    Returns
+    -------
+    list
+        List of paths to the generated plot files
+    """
+    import pandas as pd
+    
+    # Read the CSV file
+    try:
+        summary_df = pd.read_csv(csv_path)
+        print(f"✓ Loaded summary data from {csv_path}")
+        print(f"  Found {len(summary_df)} records")
+    except Exception as e:
+        print(f"Error reading CSV file: {e}")
+        return []
+    
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Generate feature plots
+    print("\nGenerating feature plots...")
+    feature_plots = generate_feature_plots(summary_df, output_dir)
+    
+    # Generate SD plot
+    print("\nGenerating SD plot...")
+    sd_plot = generate_sd_plot(summary_df, output_dir)
+    
+    return feature_plots + [sd_plot]
+
 def main():
     r"""
     Main function to orchestrate thickness processing pipeline.
     ---
+    Two workflow modes:
+    
+    1. Full pipeline (generate CSV + plots):
+       python automate_thickness_processing.py -mdir "path/to/thickness/files" -o "path/to/output"
+    
+    2. Plots only from existing CSV:
+       python automate_thickness_processing.py -d "path/to/summary_thickness.csv" -o "path/to/output"
+    
     example usage (use forward slashes for Windows paths in command line):
-    python automate_thickness_processing.py -mdir "Z:\sandboxes\Jerry\hpc biv-me data\analysis\Tof_44cases_thickness" -o "C:\Users\jchu579\Documents\SRS 2025_26\dev_space\output_thickness"
+    >>> python automate_thickness_processing.py -mdir "Z:\sandboxes\Jerry\hpc biv-me data\analysis\Tof_44cases_thickness" -o "C:\Users\jchu579\Documents\SRS 2025_26\dev_space\output_thickness"
+    
+    >>> python automate_thickness_processing.py -d "C:\Users\jchu579\Documents\SRS 2025_26\dev_space\output_thickness\thickness_analysis_20260119_142804\summary_thickness.csv" -o "C:\Users\jchu579\Documents\SRS 2025_26\dev_space\output_thickness"
     """
     # Parse arguments
     args = setup_argparse()
     
-    # Create timestamped output folder
-    output_folder = create_output_folder(args.output_dir)
-    
-    # Locate thickness files
-    print(f"Searching for thickness files in {args.model_dir}...")
-    thickness_files = locate_thickness_files(args.model_dir)
-    
-    if not thickness_files:
-        print("No thickness files found!")
-        return
-    
-    print(f"Found {len(thickness_files)} thickness files")
-    
-    # Generate summary CSV
-    csv_path, summary_df = generate_summary_csv(thickness_files, output_folder)
-    
-    # Generate individual feature plots
-    feature_plots = generate_feature_plots(summary_df, output_folder)
-    
-    print("\n✓ Processing complete!")
+    # Check if using CSV mode or full pipeline mode
+    if args.data:
+        # Mode 1: Load CSV and generate plots only
+        if not os.path.exists(args.data):
+            print(f"Error: CSV file not found at {args.data}")
+            return
+        
+        print(f"Using summary data mode...")
+        load_and_generate_plots(args.data, args.output_dir)
+        print("\n✓ Plot generation complete!")
+        
+    else:
+        # Mode 2: Full pipeline (CSV generation + plots)
+        if not args.model_dir:
+            print("Error: Either -mdir (for full pipeline) or -d (for plots only) must be specified")
+            return
+        
+        # Create timestamped output folder
+        output_folder = create_output_folder(args.output_dir)
+        
+        # Locate thickness files
+        print(f"Searching for thickness files in {args.model_dir}...")
+        thickness_files = locate_thickness_files(args.model_dir)
+        
+        if not thickness_files:
+            print("No thickness files found!")
+            return
+        
+        print(f"Found {len(thickness_files)} thickness files")
+        
+        # Generate summary CSV
+        csv_path, summary_df = generate_summary_csv(thickness_files, output_folder)
+        
+        # Generate individual feature plots
+        feature_plots = generate_feature_plots(summary_df, output_folder)
+        
+        print("\n✓ Processing complete!")
 
 # Run the function
 # inspect_nifti(r"C:\Users\jchu579\Documents\SRS 2025_26\biv-me-dev\src\bivme\analysis\example_thickness\patient1\lv_thickness_patient1_000.nii")
