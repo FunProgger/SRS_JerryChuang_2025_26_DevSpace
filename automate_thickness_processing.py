@@ -290,7 +290,9 @@ def generate_summary_csv(thickness_files, output_dir):
                     'thickness_type': thickness_type,
                     'avg_thickness': stats['avg_thickness'],
                     'min_thickness': stats['min_thickness'],
-                    'max_thickness': stats['max_thickness']
+                    'max_thickness': stats['max_thickness'],
+                    'skip_rv': '',
+                    'skip_lv': ''
                 })
                 # Track processed folders
                 if folder_name not in processed_folders:
@@ -522,11 +524,14 @@ def load_and_generate_plots(csv_path, output_dir):
     This function skips CSV generation and only creates visualizations from existing data.
     Useful for regenerating plots from previously generated summary CSV files.
     
+    Supports skip flags: If skip_rv or skip_lv columns contain "*", those rows are excluded
+    from plot generation for the corresponding thickness type.
+    
     Parameters
     ----------
     csv_path : str
         Path to the summary CSV file (must have same format as summary_thickness.csv)
-        Required columns: folder_name, frame, thickness_type, avg_thickness, min_thickness, max_thickness
+        Required columns: folder_name, frame, thickness_type, avg_thickness, min_thickness, max_thickness, skip_rv, skip_lv
     output_dir : str
         Output directory for the plots
     
@@ -546,16 +551,41 @@ def load_and_generate_plots(csv_path, output_dir):
         print(f"Error reading CSV file: {e}")
         return []
     
-    # Create output directory if it doesn't exist
-    os.makedirs(output_dir, exist_ok=True)
+    # Filter out rows based on skip flags (if skip columns exist)
+    # For RV: skip if thickness_type=='rv' AND skip_rv contains '*'
+    # For LV: skip if thickness_type=='lv' AND skip_lv contains '*'
+    original_len = len(summary_df)
+    
+    # Only apply skip logic if skip columns exist in the CSV
+    if 'skip_rv' in summary_df.columns and 'skip_lv' in summary_df.columns:
+        skip_mask = pd.Series([False] * len(summary_df), index=summary_df.index)
+        for idx, row in summary_df.iterrows():
+            if row['thickness_type'] == 'rv' and pd.notna(row.get('skip_rv', '')) and '*' in str(row.get('skip_rv', '')):
+                skip_mask.loc[idx] = True
+            elif row['thickness_type'] == 'lv' and pd.notna(row.get('skip_lv', '')) and '*' in str(row.get('skip_lv', '')):
+                skip_mask.loc[idx] = True
+        
+        summary_df = summary_df[~skip_mask]
+        
+        if len(summary_df) < original_len:
+            print(f"  Skipped {original_len - len(summary_df)} records based on skip flags")
+            print(f"  Generating plots with {len(summary_df)} records")
+    else:
+        print(f"  Note: CSV does not have skip_rv/skip_lv columns, generating plots with all {len(summary_df)} records")
+    
+    # Create timestamped output folder (same format as create_output_folder)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamped_folder = os.path.join(output_dir, f"thickness_analysis_{timestamp}")
+    os.makedirs(timestamped_folder, exist_ok=True)
+    print(f"\n✓ Created output folder: {timestamped_folder}")
     
     # Generate feature plots
     print("\nGenerating feature plots...")
-    feature_plots = generate_feature_plots(summary_df, output_dir)
+    feature_plots = generate_feature_plots(summary_df, timestamped_folder)
     
     # Generate SD plot
     print("\nGenerating SD plot...")
-    sd_plot = generate_sd_plot(summary_df, output_dir)
+    sd_plot = generate_sd_plot(summary_df, timestamped_folder)
     
     return feature_plots + [sd_plot]
 
