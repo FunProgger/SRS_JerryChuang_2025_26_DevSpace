@@ -117,144 +117,174 @@ def locate_thickness_files(model_dir):
     
     return thickness_files
 
-def inspect_nifti(file_path, return_stats=False, verbose=True):
+class NIfTIAnalyzer:
     """
-    Analyze and visualize left ventricle wall thickness from NIfTI medical imaging files.
+    Class for analyzing and visualizing NIfTI medical imaging files.
     
-    This function loads a NIfTI format thickness map and generates comprehensive analysis
+    This class loads a NIfTI format thickness map and provides comprehensive analysis
     including statistics, distribution histograms, and spatial visualization of thickness
     values across multiple slices.
+    
+    Attributes
+    ----------
+    file_path : str
+        Path to the NIfTI file
+    data_shape : tuple
+        Shape of the NIfTI data (e.g., (256, 256, 120))
+    unique_data : numpy.ndarray
+        Array of unique values found in the NIfTI data
+    affine : numpy.ndarray
+        Affine transformation matrix (voxel to mm mapping)
+    data : numpy.ndarray
+        Raw NIfTI data array
+    header : nibabel header
+        NIfTI file header information
+    
+    Examples
+    --------
+    >>> analyzer = NIfTIAnalyzer("patient1/lv_thickness_patient1_002.nii")
+    >>> stats = analyzer.get_statistics()
+    >>> analyzer.visualize()
+    """
+    
+    def __init__(self, file_path):
+        """
+        Initialize NIfTIAnalyzer by loading a NIfTI file.
+        
+        Parameters
+        ----------
+        file_path : str
+            Absolute path to the NIfTI file (.nii or .nii.gz format)
+        """
+        self.file_path = file_path
+        
+        # Load the file
+        img = nib.load(file_path)
+        self.header = img.header
+        self.data = img.get_fdata()
+        self.affine = img.affine
+        
+        # Set attributes
+        self.data_shape = self.data.shape
+        self.unique_data = np.unique(self.data)
+    
+    def print_file_info(self):
+        """Print detailed information about the NIfTI file."""
+        print(f"--- File Inspection: {self.file_path} ---")
+        print(f"Shape: {self.data_shape}")
+        print(f"Voxel Sizes (mm): {self.header.get_zooms()}")
+        print(f"Unique Label Values found: {self.unique_data}")
+        print("\nAffine Matrix (Voxel -> MM mapping):")
+        print(self.affine)
+    
+    def get_statistics(self, verbose=True):
+        """
+        Calculate and return thickness statistics.
+        
+        Parameters
+        ----------
+        verbose : bool, optional
+            If True, print statistics to console. Default is True.
+        
+        Returns
+        -------
+        dict
+            Dictionary containing:
+            - 'avg_thickness': Average thickness in mm
+            - 'min_thickness': Minimum thickness in mm
+            - 'max_thickness': Maximum thickness in mm
+            - 'max_location': 3D coordinates of maximum
+            - 'min_location': 3D coordinates of minimum
+        """
+        valid_data = self.data[self.data > 0]  # Exclude 0 and background
+        valid_data = valid_data[~np.isnan(valid_data)]  # Exclude NaN values
+        
+        # Find global max and min thickness
+        max_thickness = np.nanmax(self.data)
+        min_valid_data = self.data[self.data > 0]
+        min_thickness = np.nanmin(min_valid_data)
+        avg_thickness = np.nanmean(valid_data)
+        
+        # Find 3D coordinates of max and min
+        max_loc = np.unravel_index(np.nanargmax(self.data), self.data.shape)
+        min_loc = np.unravel_index(np.nanargmin(np.ma.masked_where(self.data <= 0, self.data)), self.data.shape)
+        
+        if verbose:
+            print("\nThickness Statistics:")
+            print(f"Global Maximum Thickness: {max_thickness:.2f} mm")
+            print(f"  Location: X={max_loc[1]}, Y={max_loc[0]}, Slice={max_loc[2]}")
+            print(f"\nGlobal Minimum Thickness: {min_thickness:.2f} mm")
+            print(f"  Location: X={min_loc[1]}, Y={min_loc[0]}, Slice={min_loc[2]}")
+            print(f"\nGlobal Average Thickness: {avg_thickness:.2f} mm")
+            
+            if len(valid_data) > 0:
+                print(f"\nSummary Statistics:")
+                print(f"Min thickness: {valid_data.min():.2f} mm")
+                print(f"Max thickness: {valid_data.max():.2f} mm")
+                print(f"Mean thickness: {valid_data.mean():.2f} mm")    
+                print(f"Number of voxels with thickness: {len(valid_data)}")
+            else:
+                print("No valid thickness data found")
+        
+        return {
+            'avg_thickness': float(avg_thickness),
+            'min_thickness': float(min_thickness),
+            'max_thickness': float(max_thickness),
+            'max_location': max_loc,
+            'min_location': min_loc
+        }
+    
+    def visualize(self):
+        """Generate and display histogram of thickness distribution."""
+        valid_data = self.data[self.data > 0]
+        valid_data = valid_data[~np.isnan(valid_data)]
+        
+        fig = plt.figure(figsize=(10, 6))
+        ax = fig.add_subplot(111)
+        
+        ax.hist(valid_data, bins=100, edgecolor='black', alpha=0.7, color='blue')
+        ax.set_xlabel('Thickness (mm)')
+        ax.set_ylabel('Number of Voxels')
+        ax.set_title('Histogram: Distribution of Left Ventricle Wall Thickness')
+        ax.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.show()
+
+
+def inspect_nifti(file_path, return_stats=False, verbose=True):
+    """
+    Legacy function wrapper for NIfTIAnalyzer class.
+    
+    This function maintains backward compatibility with existing code.
+    For new code, use NIfTIAnalyzer class directly.
     
     Parameters
     ----------
     file_path : str
-        Absolute path to the NIfTI file (.nii or .nii.gz format) containing left ventricle
-        wall thickness data in millimeters.
+        Absolute path to the NIfTI file (.nii or .nii.gz format)
     return_stats : bool, optional
-        If True, return statistics dictionary instead of displaying plot. Default is False.
+        If True, return statistics dictionary. Default is False.
+    verbose : bool, optional
+        If True, print analysis information. Default is True.
     
     Returns
     -------
     dict or None
-        If return_stats is True, returns dictionary with keys:
-        - 'avg_thickness': Average thickness in mm
-        - 'min_thickness': Minimum thickness in mm
-        - 'max_thickness': Maximum thickness in mm
-        Otherwise returns None and displays matplotlib visualization.
-    
-    Analysis Components
-    -------------------
-    1. File Properties: Loads NIfTI header, dimensions, voxel sizes, and affine matrix
-    2. Data Statistics: Identifies unique thickness values, excludes background (0) and NaN
-    3. Global Extrema: Finds maximum, minimum, and average thickness with 3D coordinates
-    4. Visualizations:
-       - Histogram of thickness distribution across all voxels
-    
-    Output
-    ------
-    Prints to console:
-        - Global maximum thickness value, location (X, Y, slice)
-        - Global minimum thickness value, location (X, Y, slice)
-        - Global average thickness value, location (X, Y, slice)
-        - Middle slice statistics (min, max, average with coordinates)
-        - Summary statistics (min, max, mean thickness, voxel count)
-    
-    Displays matplotlib figure:
-        - Histogram of thickness distribution
-    
-    Notes
-    -----
-    - Background voxels with value 0 are excluded from analysis
-    - NaN values are filtered out before computing statistics
-    - Coordinates are in (X, Y, slice) format where X and Y are voxel indices
-    - Thickness values are in millimeters (mm)
-    
-    Examples
-    --------
-    >>> inspect_nifti("patient1/lv_thickness_patient1_002.nii")
+        If return_stats is True, returns dictionary with thickness statistics.
+        Otherwise, displays visualization and returns None.
     """
-    # 1. Load the file
-    img = nib.load(file_path)
-    header = img.header
-    data = img.get_fdata()
-    affine = img.affine
-
+    analyzer = NIfTIAnalyzer(file_path)
+    
     if verbose:
-        print(f"--- File Inspection: {file_path} ---")
-        
-        # 2. Dimensions and Resolution
-        print(f"Shape: {data.shape}") # e.g., (256, 256, 120)
-        print(f"Voxel Sizes (mm): {header.get_zooms()}")
-        
-        # 3. Label Check
-        unique_labels = np.unique(data)
-        print(f"Unique Label Values found: {unique_labels}")
-        
-        # 4. Spatial Orientation (The Affine)
-        print("\nAffine Matrix (Voxel -> MM mapping):")
-        print(affine)
-
-        # 5. Plot All Thickness Data
+        analyzer.print_file_info()
         print("\nPlotting thickness distribution...")
-    valid_data = data[data > 0]  # Exclude 0 and background
-    valid_data = valid_data[~np.isnan(valid_data)]  # Exclude NaN values
     
-    # Find global max and min thickness
-    max_thickness = np.nanmax(data)
-    min_valid_data = data[data > 0]
-    min_thickness = np.nanmin(min_valid_data)
-    avg_thickness = np.nanmean(valid_data)
-    
-    # Find 3D coordinates of max and min
-    max_loc = np.unravel_index(np.nanargmax(data), data.shape)
-    min_loc = np.unravel_index(np.nanargmin(np.ma.masked_where(data <= 0, data)), data.shape)
-    
-    # Find 3D coordinate of average thickness
-    avg_loc = np.unravel_index(np.nanargmin(np.abs(data - avg_thickness)), data.shape)
-    
-    max_slice = max_loc[2]
-    min_slice = min_loc[2]
-    avg_slice = avg_loc[2]
-    
-    if verbose:
-        print(f"\nGlobal Maximum Thickness: {max_thickness:.2f} mm")
-        print(f"  Location: X={max_loc[1]}, Y={max_loc[0]}, Slice={max_slice}")
-        print(f"\nGlobal Minimum Thickness: {min_thickness:.2f} mm")
-        print(f"  Location: X={min_loc[1]}, Y={min_loc[0]}, Slice={min_slice}")
-        print(f"\nGlobal Average Thickness: {avg_thickness:.2f} mm")
-        print(f"  Location: X={avg_loc[1]}, Y={avg_loc[0]}, Slice={avg_slice}")
-        
-        # 6. Thickness Statistics
-        if len(valid_data) > 0:
-            print(f"Min thickness: {valid_data.min():.2f} mm")
-            print(f"Max thickness: {valid_data.max():.2f} mm")
-            print(f"Mean thickness: {valid_data.mean():.2f} mm")    
-            print(f"Number of voxels with thickness: {len(valid_data)}")
-        else:
-            print("No valid thickness data found")
-    
-    # Return statistics if requested
     if return_stats:
-        return {
-            'avg_thickness': float(avg_thickness),
-            'min_thickness': float(min_thickness),
-            'max_thickness': float(max_thickness)
-        }
-    
-    # Create a figure with histogram only
-    fig = plt.figure(figsize=(10, 6))
-    
-    ax1 = fig.add_subplot(111)  # Histogram only
-    
-    # Histogram
-    ax1.hist(valid_data, bins=100, edgecolor='black', alpha=0.7, color='blue')
-    ax1.set_xlabel('Thickness (mm)')
-    ax1.set_ylabel('Number of Voxels')
-    ax1.set_title('Histogram: Distribution of Left Ventricle Wall Thickness')
-    ax1.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    plt.show()
+        return analyzer.get_statistics(verbose=verbose)
+    else:
+        analyzer.get_statistics(verbose=verbose)
+        analyzer.visualize()
 
 def generate_summary_csv(thickness_files, output_dir):
     """
