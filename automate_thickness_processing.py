@@ -149,8 +149,8 @@ class NIfTIAnalyzer:
     
     def __init__(self, file_path):
         """
-        Initialize NIfTIAnalyzer by loading a NIfTI file.
-        
+            Initialize NIfTIAnalyzer by loading a NIfTI file.
+            
         Parameters
         ----------
         file_path : str
