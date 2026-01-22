@@ -15,6 +15,7 @@ def setup_argparse():
         Parsed command line arguments with attributes:
         - mdir: Path to the directory containing NIfTI files to inspect
         - odir: Output directory for visualizations
+        - threshold: Thickness threshold for detecting outliers
     """
     parser = argparse.ArgumentParser(
         description='Inspect and analyze maximum thickness from NIfTI files.'
@@ -30,6 +31,13 @@ def setup_argparse():
         dest='odir',
         required=True,
         help='Output directory for visualizations'
+    )
+    parser.add_argument(
+        '-t', '--threshold',
+        dest='threshold',
+        type=float,
+        default=50,
+        help='Thickness threshold for detecting outliers (default: 50 mm)'
     )
     return parser.parse_args()
 
@@ -126,20 +134,52 @@ def detect_and_visualize_outliers(file_path, output_dir, threshold=50):
     
     return viz_paths
 
+def create_output_folder_from_model_dir(output_dir, model_dir):
+    """
+    Create a timestamped folder within the output directory, including model directory name.
+    
+    Parameters
+    ----------
+    output_dir : str
+        Base output directory path
+    model_dir : str
+        Model directory path (used to extract folder name)
+    
+    Returns
+    -------
+    str
+        Path to the newly created timestamped folder
+    """
+    from datetime import datetime
+    
+    # Extract folder name from model_dir
+    model_folder_name = os.path.basename(model_dir.rstrip(os.sep))
+    
+    # Create timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Create timestamped folder with model directory name at the START
+    timestamped_folder = os.path.join(output_dir, f"{model_folder_name}_thickness_analysis_{timestamp}")
+    
+    # Create the folder
+    os.makedirs(timestamped_folder, exist_ok=True)
+    print(f"\n✓ Created output folder: {timestamped_folder}")
+    
+    return timestamped_folder
+
 def main():
     args = setup_argparse()
     
-    output_dir = create_output_folder(args.odir)
+    output_dir = create_output_folder_from_model_dir(args.odir, args.mdir)
     nifti_list = locate_thickness_files(args.mdir)
     
     for nifti in nifti_list:
         analyzer = NIfTIAnalyzer(nifti) 
         stats = analyzer.get_statistics(verbose=False)
         
-        # Detect and visualize outliers (threshold = 50 mm)
-        check_thickness = 0 
-        if stats['max_thickness'] > check_thickness:
-            detect_and_visualize_outliers(nifti, output_dir, threshold=check_thickness)
+        # Detect and visualize outliers using specified threshold
+        if stats['max_thickness'] > args.threshold:
+            detect_and_visualize_outliers(nifti, output_dir, threshold=args.threshold)
     
 
 if __name__ == "__main__":
