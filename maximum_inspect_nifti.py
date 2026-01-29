@@ -1,5 +1,6 @@
 import argparse
 import os
+import csv
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 import numpy as np
@@ -173,13 +174,48 @@ def main():
     output_dir = create_output_folder_from_model_dir(args.odir, args.mdir)
     nifti_list = locate_thickness_files(args.mdir)
     
+    # List to collect CSV data
+    csv_data = []
+    
     for nifti in nifti_list:
         analyzer = NIfTIAnalyzer(nifti) 
         stats = analyzer.get_statistics(verbose=False)
         
+        # Extract file information
+        file_name = os.path.basename(nifti)
+        parts = file_name.replace('.nii.gz', '').replace('.nii', '').split('_')
+        thickness_type = parts[0].upper() if len(parts) > 0 else 'unknown'  # 'RV' or 'LV'
+        folder_name = parts[2] if len(parts) > 2 else 'unknown'
+        frame = parts[3] if len(parts) > 3 else 'unknown'
+        slice_location = stats['max_location'][2]
+        
         # Detect and visualize outliers using specified threshold
         if stats['max_thickness'] > args.threshold:
             detect_and_visualize_outliers(nifti, output_dir, threshold=args.threshold)
+            
+            # Add to CSV data
+            csv_data.append({
+                'Case Name': folder_name,
+                'thickness_type': thickness_type,
+                'frame': frame,
+                'maximum value': stats['max_thickness'],
+                'slice': slice_location
+            })
+    
+    # Generate CSV file
+    if csv_data:
+        csv_path = os.path.join(output_dir, 'maximum_thickness_outliers.csv')
+        with open(csv_path, 'w', newline='') as csvfile:
+            fieldnames = ['Case Name', 'thickness_type', 'frame', 'maximum value', 'slice']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            
+            writer.writeheader()
+            writer.writerows(csv_data)
+        
+        print(f"\n✓ CSV file saved: {csv_path}")
+        print(f"  Found {len(csv_data)} outlier(s) above threshold {args.threshold} mm")
+    else:
+        print(f"\n✓ No outliers found above threshold {args.threshold} mm")
     
 
 if __name__ == "__main__":
