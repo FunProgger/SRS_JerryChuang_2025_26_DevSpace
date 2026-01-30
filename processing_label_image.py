@@ -118,6 +118,7 @@ def create_heatmap(nii_file_path, output_dir=None, slice_idx=None, slice_lookup=
     # Mark max location if coordinates are available (note: data is transposed for display)
     if x_coord is not None and y_coord is not None:
         ax.plot(x_coord, y_coord, 'k.', markersize=5, label='Max Thickness Location')
+        ax.legend(loc='upper right', fontsize=10)
     
     # Add colorbar
     cbar = plt.colorbar(im, ax=ax, ticks=[-0.625, 0.125, 0.875, 1.625])
@@ -203,7 +204,7 @@ def main():
     >>> python processing_label_image.py -i "Z:\\data\\nii_files" -o "C:\\output\\heatmaps" -csv "slices.csv"
 
     Usage:
-    python processing_label_image.py -i "Z:\\sandboxes\\Jerry\\hpc biv-me data\\analysis\\Labelled" -o "C:\\Users\\jchu579\\Documents\\SRS 2025_26\\dev_space\\output_label" -csv "Z:\\sandboxes\\Jerry\\hpc biv-me data\\analysis\\version1_thickness_rerun\\version1_thickness_rerun_thickness_analysis_20260130_125430\\maximum_thickness_outliers.csv"
+    python processing_label_image.py -i "Z:\\sandboxes\\Jerry\\hpc biv-me data\\analysis\\Labelled" -o "C:\\Users\\jchu579\\Documents\\SRS 2025_26\\dev_space\\output_label" -csv "Z:\sandboxes\Jerry\hpc biv-me data\analysis\version1_thickness_rerun\version1_thickness_rerun_thickness_analysis_20260130_144632\maximum_thickness_outliers.csv"
     """
     parser = argparse.ArgumentParser(
         description='Process NIfTI files and generate heatmaps.'

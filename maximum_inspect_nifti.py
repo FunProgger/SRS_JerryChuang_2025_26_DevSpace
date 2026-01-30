@@ -95,7 +95,7 @@ def detect_and_visualize_outliers(file_path, output_dir, threshold=50):
             scale_type = "Linear Scale"
         
         # Mark the location of maximum thickness with red X
-        ax.plot(x_coord, y_coord, 'rx', markersize=15, markeredgewidth=3, label='Max Thickness Location')
+        ax.plot(x_coord, y_coord, 'g.', markersize=5, markeredgewidth=3, label='Max Thickness Location')
         
         # Extract folder name and frame from file path
         file_name = os.path.basename(file_path)
@@ -187,7 +187,10 @@ def main():
         thickness_type = parts[0].upper() if len(parts) > 0 else 'unknown'  # 'RV' or 'LV'
         folder_name = parts[2] if len(parts) > 2 else 'unknown'
         frame = parts[3] if len(parts) > 3 else 'unknown'
-        slice_location = stats['max_location'][2]
+        max_loc = stats['max_location']
+        x_location = max_loc[1]
+        y_location = max_loc[0]
+        slice_location = max_loc[2]
         
         # Detect and visualize outliers using specified threshold
         if stats['max_thickness'] > args.threshold:
@@ -199,14 +202,17 @@ def main():
                 'thickness_type': thickness_type,
                 'frame': frame,
                 'maximum value': stats['max_thickness'],
-                'slice': slice_location
+                'x': x_location,
+                'y': y_location,
+                'slice': slice_location,
+                'shape': analyzer.data_shape
             })
     
     # Generate CSV file
     if csv_data:
         csv_path = os.path.join(output_dir, 'maximum_thickness_outliers.csv')
         with open(csv_path, 'w', newline='') as csvfile:
-            fieldnames = ['Case Name', 'thickness_type', 'frame', 'maximum value', 'slice']
+            fieldnames = ['Case Name', 'thickness_type', 'frame', 'maximum value', 'x', 'y', 'slice', 'shape']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             
             writer.writeheader()
@@ -219,4 +225,10 @@ def main():
     
 
 if __name__ == "__main__":
+    """
+    Example usage:
+    (Current: 30/01/2026)
+    python maximum_inspect_nifti.py -mdir "Z:\sandboxes\Jerry\hpc biv-me data\analysis\version1_thickness_rerun" -odir "Z:\sandboxes\Jerry\hpc biv-me data\analysis\version1_thickness_rerun"    
+    """
+
     main()
