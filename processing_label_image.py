@@ -56,11 +56,18 @@ def create_heatmap(nii_file_path, output_dir=None, slice_idx=None, slice_lookup=
     # Load NIfTI file
     img = nib.load(nii_file_path)
     data = img.get_fdata()
+    print(f"get_fdata() shape: {data.shape}")
+
+    x_coord = None
+    y_coord = None
     
     # Extract case name and thickness type from filename
     file_name = os.path.basename(nii_file_path)
     
     # Try to parse filename to get case_name, thickness_type, and frame
+    x_coord = None
+    y_coord = None
+
     if slice_lookup is not None:
         # Expected format: [thickness_type]_thickness_[case_name]_[frame].nii
         # or labeled_image_[lv/rv]_[case_name]_[frame].nii
@@ -81,11 +88,14 @@ def create_heatmap(nii_file_path, output_dir=None, slice_idx=None, slice_lookup=
             case_name = parts[3]
             frame = parts[4]
         
-        # Look up slice from dictionary
+        # Look up slice and coordinates from dictionary
         if case_name and thickness_type and frame:
             lookup_key = (case_name, thickness_type, frame)
             if lookup_key in slice_lookup:
-                slice_idx = slice_lookup[lookup_key]
+                entry = slice_lookup[lookup_key]
+                slice_idx = entry['slice']
+                x_coord = entry.get('x')
+                y_coord = entry.get('y')
                 print(f"  Using slice {slice_idx} from CSV for {case_name} {thickness_type} frame {frame}")
             else:
                 print(f"  ⚠ Skipping: {case_name} {thickness_type} frame {frame} not found in CSV")
@@ -103,7 +113,11 @@ def create_heatmap(nii_file_path, output_dir=None, slice_idx=None, slice_lookup=
     
     # Create heatmap
     fig, ax = plt.subplots(figsize=(10, 8))
-    im = ax.imshow(slice_data.T, cmap=cmap_discrete, origin='lower', aspect='auto', vmin=-1, vmax=2)
+    im = ax.imshow(slice_data, cmap=cmap_discrete, origin='lower', aspect='auto', vmin=-1, vmax=2)
+
+    # Mark max location if coordinates are available (note: data is transposed for display)
+    if x_coord is not None and y_coord is not None:
+        ax.plot(x_coord, y_coord, 'k.', markersize=5, label='Max Thickness Location')
     
     # Add colorbar
     cbar = plt.colorbar(im, ax=ax, ticks=[-0.625, 0.125, 0.875, 1.625])
@@ -189,7 +203,7 @@ def main():
     >>> python processing_label_image.py -i "Z:\\data\\nii_files" -o "C:\\output\\heatmaps" -csv "slices.csv"
 
     Usage:
-    python processing_label_image.py -i "Z:\\sandboxes\\Jerry\\hpc biv-me data\\analysis\\Labelled" -o "C:\\Users\\jchu579\\Documents\\SRS 2025_26\\dev_space\\output_label" -csv "maximum_thickness_outliers.csv"
+    python processing_label_image.py -i "Z:\\sandboxes\\Jerry\\hpc biv-me data\\analysis\\Labelled" -o "C:\\Users\\jchu579\\Documents\\SRS 2025_26\\dev_space\\output_label" -csv "Z:\\sandboxes\\Jerry\\hpc biv-me data\\analysis\\version1_thickness_rerun\\version1_thickness_rerun_thickness_analysis_20260130_125430\\maximum_thickness_outliers.csv"
     """
     parser = argparse.ArgumentParser(
         description='Process NIfTI files and generate heatmaps.'
@@ -212,7 +226,7 @@ def main():
         dest='csv_file',
         required=False,
         default=None,
-        help='CSV file with columns: Case Name, thickness_type, maximum value, slice'
+        help='CSV file with columns: Case Name, thickness_type, frame, maximum value, x, y, slice'
     )
     
     args = parser.parse_args()
@@ -230,7 +244,13 @@ def main():
                     thickness_type = str(row['thickness_type']).strip().upper()
                     frame = str(row['frame']).strip()
                     slice_idx = int(row['slice'])
-                    slice_lookup[(case_name, thickness_type, frame)] = slice_idx
+                    x_coord = int(row['x']) if 'x' in row and not pd.isna(row['x']) else None
+                    y_coord = int(row['y']) if 'y' in row and not pd.isna(row['y']) else None
+                    slice_lookup[(case_name, thickness_type, frame)] = {
+                        'slice': slice_idx,
+                        'x': x_coord,
+                        'y': y_coord
+                    }
                 
                 print(f"✓ Loaded slice information from CSV: {args.csv_file}")
                 print(f"  Found {len(slice_lookup)} case/type/frame combinations")
