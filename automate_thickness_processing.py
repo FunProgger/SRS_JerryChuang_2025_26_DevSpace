@@ -149,8 +149,8 @@ class NIfTIAnalyzer:
     
     def __init__(self, file_path):
         """
-            Initialize NIfTIAnalyzer by loading a NIfTI file.
-            
+        Initialize NIfTIAnalyzer by loading a NIfTI file.
+        
         Parameters
         ----------
         file_path : str
@@ -162,6 +162,7 @@ class NIfTIAnalyzer:
         img = nib.load(file_path)
         self.header = img.header
         self.data = img.get_fdata()
+        # print(f"get_fdata() shape: {self.data.shape}")
         self.affine = img.affine
         
         # Set attributes
@@ -231,12 +232,13 @@ class NIfTIAnalyzer:
             'min_thickness': float(min_thickness),
             'max_thickness': float(max_thickness),
             'max_location': max_loc,
-            'min_location': min_loc
+            'min_location': min_loc,
+            'shape': self.data_shape
         }
     
-    def visualize(self):
+    def visualize(self, min_range=0):
         """Generate and display histogram of thickness distribution."""
-        valid_data = self.data[self.data > 0]
+        valid_data = self.data[self.data > min_range]
         valid_data = valid_data[~np.isnan(valid_data)]
         
         fig = plt.figure(figsize=(10, 6))
@@ -250,6 +252,17 @@ class NIfTIAnalyzer:
         
         plt.tight_layout()
         plt.show()
+
+    def get_fdata(self):
+        """
+        Get the raw NIfTI data array.
+        
+        Returns
+        -------
+        numpy.ndarray
+            Raw NIfTI data array
+        """
+        return self.data
 
 
 def inspect_nifti(file_path, return_stats=False, verbose=True):
