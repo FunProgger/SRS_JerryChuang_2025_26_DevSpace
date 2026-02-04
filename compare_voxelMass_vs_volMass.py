@@ -6,6 +6,9 @@ import pandas as pd
 import scipy.stats as stats
 import statsmodels.api as sm
 
+# Error band percentage (as decimal)
+ERROR_BAND = 0.10  # ±10%
+
 def merge_mass_data(output_csv: str, voxelMass_csv: str, volMass_csv: str): 
     """
     Docstring for merge_mass_data
@@ -100,9 +103,36 @@ def _plot_analysis_suite(vol, voxel, output_path, title_prefix):
     plt.close(fig)
 
 
+def _compute_error_band(series: pd.Series, frames: pd.Series):
+    if series.dropna().empty:
+        return None
+
+    ordered = pd.DataFrame({"Frame": frames, "Mass": series}).sort_values("Frame")
+    ordered_mass = ordered["Mass"].dropna()
+    if ordered_mass.empty:
+        return None
+
+    ed_mass = ordered_mass.iloc[0]
+    mean_mass = series.dropna().mean()
+    band = abs(ed_mass) * ERROR_BAND
+    return mean_mass, band
+
+
+def _assess_quality(series: pd.Series, frames: pd.Series):
+    stats = _compute_error_band(series, frames)
+    if stats is None:
+        return "n/a"
+
+    mean_mass, band = stats
+    out_of_range = (series < mean_mass - band) | (series > mean_mass + band)
+    return "bad" if out_of_range.dropna().any() else "good"
+
+
 def plot_case_comparison(merged_df, output_dir):
     if "name" not in merged_df.columns:
         raise ValueError("merged_df must contain a 'name' column for case plots")
+
+    quality_results = []
 
     for case_name, case_df in merged_df.groupby("name", dropna=False):
         if pd.isna(case_name):
@@ -125,10 +155,33 @@ def plot_case_comparison(merged_df, output_dir):
             lvm_diff = case_df["lvm_vol"] - case_df["lvm_voxel"]
             rvm_diff = case_df["rvm_vol"] - case_df["rvm_voxel"]
 
+            lvm_voxel_band = _compute_error_band(case_df["lvm_voxel"], case_df["Frame"])
+            rvm_voxel_band = _compute_error_band(case_df["rvm_voxel"], case_df["Frame"])
+
+            quality_results.append(
+                {
+                    "name": case_name,
+                    "lvm_voxel": _assess_quality(case_df["lvm_voxel"], case_df["Frame"]),
+                    "lvm_vol": _assess_quality(case_df["lvm_vol"], case_df["Frame"]),
+                    "rvm_voxel": _assess_quality(case_df["rvm_voxel"], case_df["Frame"]),
+                    "rvm_vol": _assess_quality(case_df["rvm_vol"], case_df["Frame"]),
+                }
+            )
+
             fig, axes = plt.subplots(2, 2, figsize=(12, 8), sharex=True, constrained_layout=True)
 
             axes[0, 0].plot(case_df["Frame"], case_df["lvm_vol"], marker="o", label="LVM vol")
             axes[0, 0].plot(case_df["Frame"], case_df["lvm_voxel"], marker="o", label="LVM voxel")
+            if lvm_voxel_band is not None:
+                lvm_voxel_mean, lvm_voxel_std = lvm_voxel_band
+                axes[0, 0].fill_between(
+                    case_df["Frame"],
+                    lvm_voxel_mean - lvm_voxel_std,
+                    lvm_voxel_mean + lvm_voxel_std,
+                    color="tab:blue",
+                    alpha=0.15,
+                    label="LVM voxel ±10%",
+                )
             axes[0, 0].set_title(f"{case_name} - LVM")
             axes[0, 0].set_ylabel("Mass")
             axes[0, 0].legend()
@@ -139,6 +192,16 @@ def plot_case_comparison(merged_df, output_dir):
 
             axes[0, 1].plot(case_df["Frame"], case_df["rvm_vol"], marker="o", label="RVM vol")
             axes[0, 1].plot(case_df["Frame"], case_df["rvm_voxel"], marker="o", label="RVM voxel")
+            if rvm_voxel_band is not None:
+                rvm_voxel_mean, rvm_voxel_std = rvm_voxel_band
+                axes[0, 1].fill_between(
+                    case_df["Frame"],
+                    rvm_voxel_mean - rvm_voxel_std,
+                    rvm_voxel_mean + rvm_voxel_std,
+                    color="tab:orange",
+                    alpha=0.15,
+                    label="RVM voxel ±10%",
+                )
             axes[0, 1].set_title(f"{case_name} - RVM")
             axes[0, 1].set_ylabel("Mass")
             axes[0, 1].legend()
@@ -166,6 +229,15 @@ def plot_case_comparison(merged_df, output_dir):
             output_path = case_dir / f"{case_name}_mass_compare.png"
             fig.savefig(output_path, dpi=150)
             plt.close(fig)
+
+    if quality_results:
+        quality_df = pd.DataFrame(quality_results)
+        plots_dir = Path(output_dir) / "plots"
+        plots_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_csv_path = plots_dir / f"quality_assessment_mass_compare_{timestamp}.csv"
+        quality_df.to_csv(output_csv_path, index=False)
+        print(f"✓ Quality assessment saved: {output_csv_path}")
 
 
 def mass_data_analysis(merged_df, output_dir): 
@@ -216,8 +288,8 @@ if __name__ == "__main__":
     # volMass_csv = r"C:\Users\jchu579\Documents\SRS 2025_26\dev_space\output_compare\test_volMass.csv"
     # voxelMass_csv = r"C:\Users\jchu579\Documents\SRS 2025_26\dev_space\output_compare\test_voxelMass.csv"
 
-    voxelMass_csv = r"Z:\sandboxes\Jerry\hpc biv-me data\analysis\Voxel_Mass\Tof_44cases_thickness_thickness_analysis_20260202_161010\mass_summary.csv"
-    volMass_csv = r"C:\Users\jchu579\Documents\SRS 2025_26\bivme-data\analysis\Vol_Time_plots_before_troubleshoot\lvrv_volumes.csv"
+    voxelMass_csv = r"Z:\sandboxes\Jerry\hpc biv-me data\analysis\Voxel_Mass\Tof_44cases_thickness_thickness_analysis_20260204_105555\mass_summary.csv"
+    volMass_csv = r"C:\Users\jchu579\Documents\SRS 2025_26\dev_space\output_volume\lvrv_volumes_20260204.csv"
     output_dir = Path(r"C:\Users\jchu579\Documents\SRS 2025_26\dev_space\output_compare")
     output_dir.mkdir(parents=True, exist_ok=True)
     plots_dir = output_dir / "plots"
