@@ -491,61 +491,61 @@ def generate_feature_plots(summary_df, output_dir):
     plot_paths = []
     
     for feature, label in zip(features, feature_labels):
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
-        axes = [ax1, ax2]
+        fig, axes = plt.subplots(2, 2, figsize=(16, 9), sharex='col')
+        ax_mean_rv, ax_mean_lv = axes[0, 0], axes[0, 1]
+        ax_sd_rv, ax_sd_lv = axes[1, 0], axes[1, 1]
+
         thickness_types = ['rv', 'lv']
-        
-        for idx, thickness_type in enumerate(thickness_types):
-            ax = axes[idx]
-            
+        for thickness_type, ax_mean, ax_sd in [("rv", ax_mean_rv, ax_sd_rv), ("lv", ax_mean_lv, ax_sd_lv)]:
             # Filter data by thickness type
             filtered_df = summary_df[summary_df['thickness_type'] == thickness_type]
-            
+
             if filtered_df.empty:
-                ax.text(0.5, 0.5, f'No data found for {thickness_type.upper()}',
-                       horizontalalignment='center', verticalalignment='center',
-                       transform=ax.transAxes, fontsize=12)
-                ax.set_title(f'{label} - {thickness_type.upper()}', fontsize=14, fontweight='bold')
+                ax_mean.text(0.5, 0.5, f'No data found for {thickness_type.upper()}',
+                            horizontalalignment='center', verticalalignment='center',
+                            transform=ax_mean.transAxes, fontsize=12)
+                ax_mean.set_title(f'{label} Mean - {thickness_type.upper()}', fontsize=14, fontweight='bold')
+                ax_sd.text(0.5, 0.5, f'No data found for {thickness_type.upper()}',
+                          horizontalalignment='center', verticalalignment='center',
+                          transform=ax_sd.transAxes, fontsize=12)
+                ax_sd.set_title(f'{label} SD - {thickness_type.upper()}', fontsize=14, fontweight='bold')
                 continue
-            
+
             # Group by folder_name and calculate statistics
             grouped = filtered_df.groupby('folder_name')[feature].agg(['mean', 'std'])
-            
+
             folder_names = grouped.index.tolist()
             x_pos = np.arange(len(folder_names))
-            
+
             # Extract mean and std values
             means = grouped['mean'].values
             stds = grouped['std'].values
-            
+
             # Calculate overall average for this feature
             overall_avg = filtered_df[feature].mean()
-            
-            # Plot bars without error bars
-            bars = ax.bar(x_pos, means, alpha=0.7, 
-                         color='steelblue', edgecolor='black', linewidth=1.2)
-            
-            # Add horizontal line for overall average
-            ax.axhline(y=overall_avg, color='red', linestyle='--', linewidth=2, 
-                      alpha=0.7, label=f'Overall Avg: {overall_avg:.2f}')
-            
-            # Customize plot
-            ax.set_xlabel('Folder Name', fontsize=12, fontweight='bold')
-            ax.set_ylabel(label, fontsize=12, fontweight='bold')
-            ax.set_title(f'{label} - {thickness_type.upper()}', fontsize=14, fontweight='bold')
-            ax.set_xticks(x_pos)
-            ax.set_xticklabels(folder_names, rotation=45, ha='right')
-            ax.legend(loc='upper left', fontsize=10)
-            ax.grid(True, alpha=0.3, axis='y', linestyle='--')
-            
-            # Add secondary y-axis for standard deviation
-            ax2 = ax.twinx()
-            ax2.set_ylabel('Standard Deviation (mm)', fontsize=12, color='purple')
-            ax2.tick_params(axis='y', labelcolor='purple')
-            
-            # Plot standard deviation as lines on secondary axis
-            ax2.plot(x_pos, stds, 'o-', color='purple', alpha=0.6, linewidth=2, markersize=6, label='Std Dev')
-        
+
+            # Mean subplot
+            ax_mean.bar(x_pos, means, alpha=0.7, color='steelblue', edgecolor='black', linewidth=1.2)
+            ax_mean.axhline(y=overall_avg, color='red', linestyle='--', linewidth=2, 
+                           alpha=0.7, label=f'Overall Avg: {overall_avg:.2f}')
+            ax_mean.set_ylabel(label, fontsize=12, fontweight='bold')
+            ax_mean.set_title(f'{label} Mean - {thickness_type.upper()}', fontsize=14, fontweight='bold')
+            ax_mean.grid(True, alpha=0.3, axis='y', linestyle='--')
+            ax_mean.legend(loc='upper left', fontsize=10)
+
+            # SD subplot
+            ax_sd.bar(x_pos, stds, alpha=0.7, color='purple', edgecolor='black', linewidth=1.2)
+            ax_sd.set_xlabel('Folder Name', fontsize=12, fontweight='bold')
+            ax_sd.set_ylabel('Standard Deviation (mm)', fontsize=12, fontweight='bold')
+            ax_sd.set_title(f'{label} SD - {thickness_type.upper()}', fontsize=14, fontweight='bold')
+            ax_sd.grid(True, alpha=0.3, axis='y', linestyle='--')
+
+            # Shared x labels
+            ax_mean.set_xticks(x_pos)
+            ax_mean.set_xticklabels(folder_names, rotation=45, ha='right')
+            ax_sd.set_xticks(x_pos)
+            ax_sd.set_xticklabels(folder_names, rotation=45, ha='right')
+
         plt.tight_layout()
         
         # Save plot
