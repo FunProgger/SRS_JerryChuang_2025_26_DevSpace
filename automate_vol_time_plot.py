@@ -1,4 +1,11 @@
-"""
+import pandas as pd 
+import matplotlib.pyplot as plt 
+import os 
+import argparse
+import numpy as np
+from datetime import datetime
+
+r"""
 Automated Volume-Time Plot Generation with Quality Assessment
 
 This module generates volume versus time plots for cardiac left ventricle (LV) and 
@@ -12,7 +19,7 @@ The script performs the following operations:
 - Generates dual-axis plots showing volume and myocardial mass with error bands
 - Plots variation of points from the mean for LVM and RVM measurements
 - Conducts quality assessment of measurements based on ±10% error tolerance
-- Generates a separate cross-patient standard deviation tracking plot
+- Generates a separate cross-patient mass summary plot
 - Saves plots and generates a quality assessment summary CSV
 
 Parameters
@@ -65,12 +72,10 @@ Quality Assessment (CSV)
         Quality assessment ('good' or 'bad') for RV mass measurements
     - Summary statistics of assessment results
 
-Standard Deviation Tracking Plot (PNG)
+Mass Summary Plot (PNG)
     Separate image file (std_dev_tracking_{timestamp}.png) showing:
-    - Left panel: LVM standard deviation for each patient (green bars)
-    - Right panel: RVM standard deviation for each patient (red bars)
-    - Mean lines showing average standard deviation across all patients
-    - Value labels on each bar for precise tracking
+    - Top row: Average LVM and RVM for each patient with overall mean lines
+    - Bottom row: Standard deviation from overall mean for each patient (LV/RV)
 
 Patient Statistics (CSV)
     File named patient_statistics_{timestamp}.csv with columns:
@@ -97,19 +102,12 @@ Examples
 --------
 Basic usage::
 
-    python automate_vol_time_plot.py -mdir "C:/Users/jchu579/Documents/SRS 2025_26/bivme-data/analysis/Vol_Time_plots_after_troubleshoot"
+    python automate_vol_time_plot.py -mdir "C:/Users/jchu579/Documents/SRS 2025_26/dev_space/output_volume"
 
 With custom output directory::
 
     python automate_vol_time_plot.py -mdir C:/Users/jchu579/Documents/SRS 2025_26/bivme-data -o C:/output/path
 """
-
-import pandas as pd 
-import matplotlib.pyplot as plt 
-import os 
-import argparse
-import numpy as np
-from datetime import datetime
 
 # Error band percentage (as decimal)
 ERROR_BAND = 0.10  # ±10%
@@ -143,6 +141,9 @@ quality_results = []
 
 # List to store patient statistics for std dev tracking plot
 patient_stats = []
+
+# List to store violated frame percentages
+violated_frame_stats = []
 
 # Get all CSV files from subdirectories
 csv_files = []
@@ -237,8 +238,22 @@ for file_path in csv_files:
                     'rvm_mean': rvm_mean,
                     'rvm_std': rvm_std_dev
                 })
+
+                # Store violated frame percentage (LV and RV separately)
+                total_frames = len(patient_df)
+                lvm_violated_frames = lvm_out_of_range.sum()
+                rvm_violated_frames = rvm_out_of_range.sum()
+                lvm_violated_pct = (lvm_violated_frames / total_frames) * 100 if total_frames > 0 else 0
+                rvm_violated_pct = (rvm_violated_frames / total_frames) * 100 if total_frames > 0 else 0
+                violated_frame_stats.append({
+                    'patient': patient,
+                    'lvm_violated_pct': lvm_violated_pct,
+                    'rvm_violated_pct': rvm_violated_pct
+                })
                 
-                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+                fig, axes = plt.subplots(2, 2, figsize=(14, 8), sharex='col')
+                ax1, ax2 = axes[0, 0], axes[0, 1]
+                ax1_dev, ax2_dev = axes[1, 0], axes[1, 1]
 
                 # === LV Plot ===
                 ax1.set_xlabel('Frames', fontsize=11)
@@ -260,33 +275,29 @@ for file_path in csv_files:
                 line_avg_lvm = ax3.axhline(y=lvm_mean, color='green', linestyle='--', linewidth=2, label='lvm_avg', alpha=0.7)
                 line_err_lvm = ax3.fill_between(patient_df['frame'], lvm_mean - lvm_std, lvm_mean + lvm_std, 
                                 color='green', alpha=0.15, label='lvm_error_band')
-                
-                # Plot magnitude of deviation from mean (on the left, offset)
-                lvm_deviation = patient_df['lvm'] - lvm_mean
-                lvm_deviation_mag = np.abs(lvm_deviation)
-                rvm_deviation = patient_df['rvm'] - rvm_mean
-                rvm_deviation_mag = np.abs(rvm_deviation)
-                # Set shared y-axis range for deviation magnitude plots (use max from both)
-                deviation_max = max(lvm_deviation_mag.max(), rvm_deviation_mag.max()) * 1.1
-                
-                ax3_dev = ax1.twinx()
-                ax3_dev.spines['left'].set_position(('outward', 60))
-                ax3_dev.set_ylabel('LVM |Deviation| from Mean (g)', fontsize=10, color='darkgreen')
-                ax3_dev.plot(patient_df['frame'], lvm_deviation_mag, color='darkgreen', linewidth=1.5, alpha=0.7, linestyle='--')
-                ax3_dev.scatter(patient_df['frame'], lvm_deviation_mag, color='darkgreen', s=50, alpha=0.6, 
-                               marker='^', label='lvm_deviation', edgecolors='darkgreen', linewidth=1)
-                ax3_dev.tick_params(axis='y', labelcolor='darkgreen')
-                ax3_dev.yaxis.set_label_position('left')
-                ax3_dev.yaxis.tick_left()
-                ax3_dev.set_ylim(0, deviation_max)
+
+                # Plot exceedance beyond ±10% band (separate subplot below)
+                lvm_deviation_mag = np.abs(patient_df['lvm'] - lvm_mean)
+                rvm_deviation_mag = np.abs(patient_df['rvm'] - rvm_mean)
+                lvm_exceed = np.maximum(0, lvm_deviation_mag - lvm_std)
+                rvm_exceed = np.maximum(0, rvm_deviation_mag - rvm_std)
+                deviation_max = max(lvm_exceed.max(), rvm_exceed.max()) * 1.1
+
+                ax1_dev.set_xlabel('Frames', fontsize=11)
+                ax1_dev.set_ylabel('LVM Exceedance Beyond ±10% (g)', fontsize=10, color='darkgreen')
+                ax1_dev.plot(patient_df['frame'], lvm_exceed, color='darkgreen', linewidth=1.5, alpha=0.7, linestyle='--')
+                ax1_dev.scatter(patient_df['frame'], lvm_exceed, color='darkgreen', s=50, alpha=0.6, 
+                               marker='^', label='lvm_exceed', edgecolors='darkgreen', linewidth=1)
+                ax1_dev.tick_params(axis='y', labelcolor='darkgreen')
+                ax1_dev.grid(True, alpha=0.3)
+                ax1_dev.set_ylim(0, deviation_max)
                 
                 # Combined legend
                 lines = line1 + line2
                 lines.append(line_avg_lvm)
-                # Get line from ax3_dev for deviation
-                dev_line = ax3_dev.get_lines()[0]
+                dev_line = ax1_dev.get_lines()[0]
                 lines.append(dev_line)
-                labels = [l.get_label() for l in lines[:-2]] + ['lvm_avg', 'lvm_error_band', 'lvm_deviation']
+                labels = [l.get_label() for l in lines[:-2]] + ['lvm_avg', 'lvm_error_band', 'lvm_exceed']
                 ax1.legend(lines, labels, loc='upper left', fontsize=10)
                 ax1.set_title(f'LV Volume over Frames for {patient}')
 
@@ -310,26 +321,23 @@ for file_path in csv_files:
                 line_avg_rvm = ax4.axhline(y=rvm_mean, color='red', linestyle='--', linewidth=2, label='rvm_avg', alpha=0.7)
                 line_err_rvm = ax4.fill_between(patient_df['frame'], rvm_mean - rvm_std, rvm_mean + rvm_std, 
                                 color='red', alpha=0.15, label='rvm_error_band')
-                
-                # Plot magnitude of deviation from mean (on the left, offset) - using pre-calculated deviation_max for consistency
-                ax4_dev = ax2.twinx()
-                ax4_dev.spines['left'].set_position(('outward', 60))
-                ax4_dev.set_ylabel('RVM |Deviation| from Mean (g)', fontsize=10, color='darkred')
-                ax4_dev.plot(patient_df['frame'], rvm_deviation_mag, color='darkred', linewidth=1.5, alpha=0.7, linestyle='--')
-                ax4_dev.scatter(patient_df['frame'], rvm_deviation_mag, color='darkred', s=50, alpha=0.6, 
-                               marker='^', label='rvm_deviation', edgecolors='darkred', linewidth=1)
-                ax4_dev.tick_params(axis='y', labelcolor='darkred')
-                ax4_dev.yaxis.set_label_position('left')
-                ax4_dev.yaxis.tick_left()
-                ax4_dev.set_ylim(0, deviation_max)
+
+                # Plot exceedance beyond ±10% band (separate subplot below) - using pre-calculated deviation_max for consistency
+                ax2_dev.set_xlabel('Frames', fontsize=11)
+                ax2_dev.set_ylabel('RVM Exceedance Beyond ±10% (g)', fontsize=10, color='darkred')
+                ax2_dev.plot(patient_df['frame'], rvm_exceed, color='darkred', linewidth=1.5, alpha=0.7, linestyle='--')
+                ax2_dev.scatter(patient_df['frame'], rvm_exceed, color='darkred', s=50, alpha=0.6, 
+                               marker='^', label='rvm_exceed', edgecolors='darkred', linewidth=1)
+                ax2_dev.tick_params(axis='y', labelcolor='darkred')
+                ax2_dev.grid(True, alpha=0.3)
+                ax2_dev.set_ylim(0, deviation_max)
                 
                 # Combined legend
                 lines = line3 + line4
                 lines.append(line_avg_rvm)
-                # Get line from ax4_dev for deviation
-                dev_line = ax4_dev.get_lines()[0]
+                dev_line = ax2_dev.get_lines()[0]
                 lines.append(dev_line)
-                labels = [l.get_label() for l in lines[:-2]] + ['rvm_avg', 'rvm_error_band', 'rvm_deviation']
+                labels = [l.get_label() for l in lines[:-2]] + ['rvm_avg', 'rvm_error_band', 'rvm_exceed']
                 ax2.legend(lines, labels, loc='upper left', fontsize=10)
                 ax2.set_title(f'RV Volume over Frames for {patient}')
                 
@@ -374,79 +382,119 @@ if quality_results:
     print(f"  LVM - Bad: {bad_lvm_count}, Good: {good_lvm_count}")
     print(f"  RVM - Bad: {bad_rvm_count}, Good: {good_rvm_count}")
 
-# Generate cross-patient standard deviation tracking plot
+# Generate cross-patient mass summary plot
 if patient_stats:
     stats_df = pd.DataFrame(patient_stats)
-    
-    # Calculate common y-axis limits using the maximum value from both series
-    max_std = max(stats_df['lvm_std'].max(), stats_df['rvm_std'].max())
-    y_limit = max_std * 1.15  # Add 15% margin for value labels
-    
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-    
-    # LVM standard deviation plot
+
     x_pos = np.arange(len(stats_df))
-    bars1 = ax1.bar(x_pos, stats_df['lvm_std'], color='green', alpha=0.7, edgecolor='darkgreen', linewidth=1.5)
-    ax1.set_xlabel('Patient', fontsize=12, fontweight='bold')
-    ax1.set_ylabel('Standard Deviation (g)', fontsize=12, fontweight='bold', color='green')
-    ax1.set_title('LVM Standard Deviation Across All Patients', fontsize=13, fontweight='bold')
-    ax1.set_xticks(x_pos)
-    ax1.set_xticklabels(stats_df['patient'], rotation=45, ha='right')
+    overall_lvm_mean = stats_df['lvm_mean'].mean()
+    overall_rvm_mean = stats_df['rvm_mean'].mean()
+
+    # Compute std from overall mean for each patient
+    lvm_std_from_overall = np.sqrt(stats_df['lvm_std'] ** 2 + (stats_df['lvm_mean'] - overall_lvm_mean) ** 2)
+    rvm_std_from_overall = np.sqrt(stats_df['rvm_std'] ** 2 + (stats_df['rvm_mean'] - overall_rvm_mean) ** 2)
+
+    # Set y-limits for SD plots
+    max_std = max(lvm_std_from_overall.max(), rvm_std_from_overall.max())
+    y_limit_std = max_std * 1.15
+
+    fig, axes = plt.subplots(2, 2, figsize=(16, 9), sharex='col')
+    ax1, ax2 = axes[0, 0], axes[0, 1]
+    ax3, ax4 = axes[1, 0], axes[1, 1]
+
+    # Top row: average mass for each patient with overall mean line
+    ax1.plot(x_pos, stats_df['lvm_mean'], color='green', marker='o', linewidth=2, label='LVM Mean')
+    ax1.axhline(y=overall_lvm_mean, color='darkgreen', linestyle='--', linewidth=2, label=f'Overall Mean: {overall_lvm_mean:.2f}g')
+    ax1.set_ylabel('LVM Mean (g)', fontsize=12, fontweight='bold', color='green')
+    ax1.set_title('LVM Average Mass Across Patients', fontsize=13, fontweight='bold')
     ax1.tick_params(axis='y', labelcolor='green')
     ax1.grid(True, axis='y', alpha=0.3, linestyle='--')
-    ax1.set_ylim(0, y_limit)
-    
-    # Add value labels on bars
-    for i, (bar, val) in enumerate(zip(bars1, stats_df['lvm_std'])):
-        ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01 * y_limit,
-                f'{val:.2f}', ha='center', va='bottom', fontsize=9, fontweight='bold')
-    
-    # Add mean line
-    lvm_std_mean = stats_df['lvm_std'].mean()
-    lvm_std_overall = stats_df['lvm_std'].std()
-    ax1.axhline(y=lvm_std_mean, color='darkgreen', linestyle='--', linewidth=2, 
-               label=f'Mean: {lvm_std_mean:.2f}g', alpha=0.8)
     ax1.legend(fontsize=10)
-    
-    # RVM standard deviation plot
-    bars2 = ax2.bar(x_pos, stats_df['rvm_std'], color='red', alpha=0.7, edgecolor='darkred', linewidth=1.5)
-    ax2.set_xlabel('Patient', fontsize=12, fontweight='bold')
-    ax2.set_ylabel('Standard Deviation (g)', fontsize=12, fontweight='bold', color='red')
-    ax2.set_title('RVM Standard Deviation Across All Patients', fontsize=13, fontweight='bold')
-    ax2.set_xticks(x_pos)
-    ax2.set_xticklabels(stats_df['patient'], rotation=45, ha='right')
+
+    ax2.plot(x_pos, stats_df['rvm_mean'], color='red', marker='o', linewidth=2, label='RVM Mean')
+    ax2.axhline(y=overall_rvm_mean, color='darkred', linestyle='--', linewidth=2, label=f'Overall Mean: {overall_rvm_mean:.2f}g')
+    ax2.set_ylabel('RVM Mean (g)', fontsize=12, fontweight='bold', color='red')
+    ax2.set_title('RVM Average Mass Across Patients', fontsize=13, fontweight='bold')
     ax2.tick_params(axis='y', labelcolor='red')
     ax2.grid(True, axis='y', alpha=0.3, linestyle='--')
-    ax2.set_ylim(0, y_limit)
-    
-    # Add value labels on bars
-    for i, (bar, val) in enumerate(zip(bars2, stats_df['rvm_std'])):
-        ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01 * y_limit,
-                f'{val:.2f}', ha='center', va='bottom', fontsize=9, fontweight='bold')
-    
-    # Add mean line
-    rvm_std_mean = stats_df['rvm_std'].mean()
-    rvm_std_overall = stats_df['rvm_std'].std()
-    ax2.axhline(y=rvm_std_mean, color='darkred', linestyle='--', linewidth=2, 
-               label=f'Mean: {rvm_std_mean:.2f}g', alpha=0.8)
     ax2.legend(fontsize=10)
-    
+
+    # Bottom row: SD from overall mean
+    bars1 = ax3.bar(x_pos, lvm_std_from_overall, color='green', alpha=0.7, edgecolor='darkgreen', linewidth=1.5)
+    ax3.set_xlabel('Patient', fontsize=12, fontweight='bold')
+    ax3.set_ylabel('SD from Overall Mean (g)', fontsize=12, fontweight='bold', color='green')
+    ax3.set_title('LVM SD from Overall Mean', fontsize=13, fontweight='bold')
+    ax3.tick_params(axis='y', labelcolor='green')
+    ax3.grid(True, axis='y', alpha=0.3, linestyle='--')
+    ax3.set_ylim(0, y_limit_std)
+
+    for bar, val in zip(bars1, lvm_std_from_overall):
+        ax3.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01 * y_limit_std,
+                f'{val:.2f}', ha='center', va='bottom', fontsize=9, fontweight='bold')
+
+    bars2 = ax4.bar(x_pos, rvm_std_from_overall, color='red', alpha=0.7, edgecolor='darkred', linewidth=1.5)
+    ax4.set_xlabel('Patient', fontsize=12, fontweight='bold')
+    ax4.set_ylabel('SD from Overall Mean (g)', fontsize=12, fontweight='bold', color='red')
+    ax4.set_title('RVM SD from Overall Mean', fontsize=13, fontweight='bold')
+    ax4.tick_params(axis='y', labelcolor='red')
+    ax4.grid(True, axis='y', alpha=0.3, linestyle='--')
+    ax4.set_ylim(0, y_limit_std)
+
+    for bar, val in zip(bars2, rvm_std_from_overall):
+        ax4.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01 * y_limit_std,
+                f'{val:.2f}', ha='center', va='bottom', fontsize=9, fontweight='bold')
+
+    # Shared x-axis labels
+    for ax in [ax1, ax2, ax3, ax4]:
+        ax.set_xticks(x_pos)
+        ax.set_xticklabels(stats_df['patient'], rotation=45, ha='right')
+
     plt.tight_layout()
-    
-    # Save the tracking plot
+
     tracking_plot_path = os.path.join(output_dir, f'std_dev_tracking_{timestamp}.png')
     plt.savefig(tracking_plot_path, dpi=300, bbox_inches='tight')
     plt.close()
-    print(f"\n✓ Standard deviation tracking plot saved to: {tracking_plot_path}")
-    
+    print(f"\n✓ Mass summary plot saved to: {tracking_plot_path}")
+
     # Save statistics to CSV
     stats_csv_path = os.path.join(output_dir, f'patient_statistics_{timestamp}.csv')
     stats_df.to_csv(stats_csv_path, index=False)
     print(f"✓ Patient statistics saved to: {stats_csv_path}")
-    
+
     # Print statistics summary
-    print(f"\nStandard Deviation Summary:")
-    print(f"  LVM Std Dev - Mean: {lvm_std_mean:.2f}g, Overall Std: {lvm_std_overall:.2f}g")
-    print(f"  RVM Std Dev - Mean: {rvm_std_mean:.2f}g, Overall Std: {rvm_std_overall:.2f}g")
+    print(f"\nMass Summary:")
+    print(f"  LVM Overall Mean: {overall_lvm_mean:.2f}g")
+    print(f"  RVM Overall Mean: {overall_rvm_mean:.2f}g")
 
 print("\nPlot generation complete!")
+
+# Generate violated frames scatter plot
+if violated_frame_stats:
+    violated_df = pd.DataFrame(violated_frame_stats)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6), sharey=True)
+    x_pos = np.arange(len(violated_df))
+
+    ax1.bar(x_pos, violated_df['lvm_violated_pct'], color='green', alpha=0.7, edgecolor='darkgreen', linewidth=1.2)
+    ax1.set_xlabel('Patient', fontsize=12, fontweight='bold')
+    ax1.set_ylabel('Frames Out of Bounds (%)', fontsize=12, fontweight='bold')
+    ax1.set_title('LV Violated Frames (%)', fontsize=13, fontweight='bold')
+    ax1.set_xticks(x_pos)
+    ax1.set_xticklabels(violated_df['patient'], rotation=45, ha='right')
+    ax1.grid(True, axis='y', alpha=0.3, linestyle='--')
+
+    ax2.bar(x_pos, violated_df['rvm_violated_pct'], color='red', alpha=0.7, edgecolor='darkred', linewidth=1.2)
+    ax2.set_xlabel('Patient', fontsize=12, fontweight='bold')
+    ax2.set_title('RV Violated Frames (%)', fontsize=13, fontweight='bold')
+    ax2.set_xticks(x_pos)
+    ax2.set_xticklabels(violated_df['patient'], rotation=45, ha='right')
+    ax2.grid(True, axis='y', alpha=0.3, linestyle='--')
+
+    if 'timestamp' not in locals():
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+    violated_plot_path = os.path.join(output_dir, f'violated_frames_{timestamp}.png')
+    plt.tight_layout()
+    plt.savefig(violated_plot_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"\n✓ Violated frames plot saved to: {violated_plot_path}")
