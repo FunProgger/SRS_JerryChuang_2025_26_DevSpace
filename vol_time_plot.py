@@ -2,7 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt 
 import os 
 
-dir = r"C:\Project\SRS\dev_space\analysis"
+dir = r"C:\Users\jchu579\Documents\SRS 2025_26\dev_space\output_volume"
 
 if dir == None:
     print("Directory is None")

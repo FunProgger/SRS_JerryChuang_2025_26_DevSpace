@@ -40,9 +40,28 @@ def setup_argparse():
         default=50,
         help='Thickness threshold for detecting outliers (default: 50 mm)'
     )
+    parser.add_argument(
+        '--no-plot',
+        dest='no_plot',
+        action='store_true',
+        help='Skip generating PNG heatmaps'
+    )
+    parser.add_argument(
+        '--max-plot-thickness',
+        dest='max_plot_thickness',
+        type=float,
+        default=50,
+        help='Maximum thickness to display in heatmap color scale (default: 50 mm)'
+    )
     return parser.parse_args()
 
-def detect_and_visualize_outliers(file_path, output_dir, threshold=50):
+def detect_and_visualize_outliers(
+    file_path,
+    output_dir,
+    threshold=50,
+    generate_plot=True,
+    max_plot_thickness=50,
+):
     """
     Detect thickness values above threshold and generate heatmap visualizations.
     
@@ -69,7 +88,7 @@ def detect_and_visualize_outliers(file_path, output_dir, threshold=50):
     viz_paths = []
     
     # Check if maximum exceeds threshold
-    if stats['max_thickness'] > threshold:
+    if stats['max_thickness'] > threshold and generate_plot:
         max_loc = stats['max_location']
         slice_idx = max_loc[2]
         y_coord = max_loc[0]
@@ -81,17 +100,31 @@ def detect_and_visualize_outliers(file_path, output_dir, threshold=50):
         # Create heatmap visualization
         fig, ax = plt.subplots(1, 1, figsize=(10, 8))
         
+        plot_max = min(stats['max_thickness'], max_plot_thickness)
+
         # Use logarithmic scale if maximum exceeds 100
         if stats['max_thickness'] > 100:
             # Filter out zero and negative values for log scale
             slice_data_positive = slice_data.copy()
             slice_data_positive[slice_data_positive <= 0] = np.nan
-            
-            im = ax.imshow(slice_data_positive, cmap='hot', origin='lower', aspect='auto', 
-                          norm=LogNorm(vmin=np.nanmin(slice_data_positive), vmax=np.nanmax(slice_data_positive)))
+
+            im = ax.imshow(
+                slice_data_positive,
+                cmap='hot',
+                origin='lower',
+                aspect='auto',
+                norm=LogNorm(vmin=max(np.nanmin(slice_data_positive), 1e-6), vmax=plot_max),
+            )
             scale_type = "Log Scale"
         else:
-            im = ax.imshow(slice_data, cmap='hot', origin='lower', aspect='auto')
+            im = ax.imshow(
+                slice_data,
+                cmap='hot',
+                origin='lower',
+                aspect='auto',
+                vmin=0,
+                vmax=plot_max,
+            )
             scale_type = "Linear Scale"
         
         # Mark the location of maximum thickness with red X
@@ -129,7 +162,7 @@ def detect_and_visualize_outliers(file_path, output_dir, threshold=50):
         viz_path = os.path.join(output_dir, viz_filename)
         plt.savefig(viz_path, dpi=300, bbox_inches='tight')
         print(f"✓ Outlier heatmap saved: {viz_path}")
-        
+
         viz_paths.append(viz_path)
         plt.close()
     
@@ -173,11 +206,16 @@ def main():
     
     output_dir = create_output_folder_from_model_dir(args.odir, args.mdir)
     nifti_list = locate_thickness_files(args.mdir)
+
+    case_totals = {}
+    case_progress = {}
+    for _, (_, folder_name, _) in nifti_list.items():
+        case_totals[folder_name] = case_totals.get(folder_name, 0) + 1
     
     # List to collect CSV data
     csv_data = []
     
-    for nifti in nifti_list:
+    for nifti, (_, folder_name, _) in nifti_list.items():
         analyzer = NIfTIAnalyzer(nifti) 
         stats = analyzer.get_statistics(verbose=False)
         
@@ -194,7 +232,13 @@ def main():
         
         # Detect and visualize outliers using specified threshold
         if stats['max_thickness'] > args.threshold:
-            detect_and_visualize_outliers(nifti, output_dir, threshold=args.threshold)
+            detect_and_visualize_outliers(
+                nifti,
+                output_dir,
+                threshold=args.threshold,
+                generate_plot=not args.no_plot,
+                max_plot_thickness=args.max_plot_thickness,
+            )
             
             # Add to CSV data
             csv_data.append({
@@ -207,6 +251,10 @@ def main():
                 'slice': slice_location,
                 'shape': analyzer.data_shape
             })
+
+        case_progress[folder_name] = case_progress.get(folder_name, 0) + 1
+        if case_progress[folder_name] == case_totals.get(folder_name, 0):
+            print(f"✓ Completed {folder_name}")
     
     # Generate CSV file
     if csv_data:
@@ -229,6 +277,16 @@ if __name__ == "__main__":
     Example usage:
     (Current: 30/01/2026)
     python maximum_inspect_nifti.py -mdir "Z:\sandboxes\Jerry\hpc biv-me data\analysis\version1_thickness_rerun" -odir "Z:\sandboxes\Jerry\hpc biv-me data\analysis\version1_thickness_rerun"    
+
+    No png usage: 
+    (Current: 09/02/2026)
+    python maximum_inspect_nifti.py -mdir "Z:\sandboxes\Jerry\hpc biv-me data\analysis\version1_thickness_rerun" -odir "Z:\sandboxes\Jerry\hpc biv-me data\analysis\version1_thickness_rerun_data" --no-plot
+
+    (Specific Case CHD0004101: 05/02/2026)
+    python maximum_inspect_nifti.py -mdir "Z:\sandboxes\Jerry\hpc biv-me data\analysis\Thickness" -odir "Z:\sandboxes\Jerry\hpc biv-me data\analysis\Thickness"    
+    python maximum_inspect_nifti.py -mdir "Z:\sandboxes\Jerry\hpc biv-me data\analysis\Thickness" -odir "Z:\sandboxes\Jerry\hpc biv-me data\analysis\Thickness" --no-plot
+
+
     """
 
     main()

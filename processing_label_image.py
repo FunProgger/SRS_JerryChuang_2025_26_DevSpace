@@ -205,6 +205,7 @@ def main():
 
     Usage:
     python processing_label_image.py -i "Z:\\sandboxes\\Jerry\\hpc biv-me data\\analysis\\Labelled" -o "C:\\Users\\jchu579\\Documents\\SRS 2025_26\\dev_space\\output_label" -csv "Z:\sandboxes\Jerry\hpc biv-me data\analysis\version1_thickness_rerun\version1_thickness_rerun_thickness_analysis_20260130_144632\maximum_thickness_outliers.csv"
+    python processing_label_image.py -i "C:\\Users\\jchu579\\Documents\\SRS 2025_26\\output\\Label\\Patient1" -o "C:\\Users\\jchu579\\Documents\\SRS 2025_26\\output\\Label"
     """
     parser = argparse.ArgumentParser(
         description='Process NIfTI files and generate heatmaps.'

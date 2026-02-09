@@ -43,6 +43,14 @@ def setup_argparse():
         default=None,
         help='Path to summary CSV file to generate plots from (skips CSV generation)'
     )
+
+    parser.add_argument(
+        '--max-plot-thickness',
+        dest='max_plot_thickness',
+        type=float,
+        default=50,
+        help='Maximum thickness to display in max thickness plots (default: 50 mm)'
+    )
     return parser.parse_args()
 
 def create_output_folder(output_dir):
@@ -147,7 +155,7 @@ class NIfTIAnalyzer:
     >>> analyzer.visualize()
     """
     
-    def __init__(self, file_path):
+    def __init__(self, file_path, settings=None):
         """
         Initialize NIfTIAnalyzer by loading a NIfTI file.
         
@@ -157,6 +165,9 @@ class NIfTIAnalyzer:
             Absolute path to the NIfTI file (.nii or .nii.gz format)
         """
         self.file_path = file_path
+        self.max_plot_thickness = None
+        if settings is not None:
+            self.max_plot_thickness = getattr(settings, "max_plot_thickness", None)
         
         # Load the file
         img = nib.load(file_path)
@@ -197,18 +208,16 @@ class NIfTIAnalyzer:
             - 'max_location': 3D coordinates of maximum
             - 'min_location': 3D coordinates of minimum
         """
-        valid_data = self.data[self.data > 0]  # Exclude 0 and background
-        valid_data = valid_data[~np.isnan(valid_data)]  # Exclude NaN values
+        valid_data = self.get_valid_data()
         
         # Find global max and min thickness
-        max_thickness = np.nanmax(self.data)
-        min_valid_data = self.data[self.data > 0]
-        min_thickness = np.nanmin(min_valid_data)
+        max_thickness = np.nanmax(valid_data)
+        min_thickness = np.nanmin(valid_data)
         avg_thickness = np.nanmean(valid_data)
         
         # Find 3D coordinates of max and min
-        max_loc = np.unravel_index(np.nanargmax(self.data), self.data.shape)
-        min_loc = np.unravel_index(np.nanargmin(np.ma.masked_where(self.data <= 0, self.data)), self.data.shape)
+        max_loc = np.unravel_index(np.nanargmax(valid_data), self.data.shape)
+        min_loc = np.unravel_index(np.nanargmin(valid_data), self.data.shape)
         
         if verbose:
             print("\nThickness Statistics:")
@@ -263,9 +272,24 @@ class NIfTIAnalyzer:
             Raw NIfTI data array
         """
         return self.data
+    
+    def get_valid_data(self):
+        """
+        Get the valid thickness data array (excluding 0     and NaN values).
+        
+        Returns
+        -------
+        numpy.ndarray
+            Valid thickness data array
+        """
+        valid_data = self.data[self.data > 0]  # Exclude 0 and background
+        valid_data = valid_data[~np.isnan(valid_data)]  # Exclude NaN values
+        if self.max_plot_thickness is not None:
+            valid_data = valid_data[valid_data < self.max_plot_thickness]
+        return valid_data
 
 
-def inspect_nifti(file_path, return_stats=False, verbose=True):
+def inspect_nifti(file_path, return_stats=False, verbose=True, settings=None):
     """
     Legacy function wrapper for NIfTIAnalyzer class.
     
@@ -287,7 +311,7 @@ def inspect_nifti(file_path, return_stats=False, verbose=True):
         If return_stats is True, returns dictionary with thickness statistics.
         Otherwise, displays visualization and returns None.
     """
-    analyzer = NIfTIAnalyzer(file_path)
+    analyzer = NIfTIAnalyzer(file_path, settings=settings)
     
     if verbose:
         analyzer.print_file_info()
@@ -299,7 +323,7 @@ def inspect_nifti(file_path, return_stats=False, verbose=True):
         analyzer.get_statistics(verbose=verbose)
         analyzer.visualize()
 
-def generate_summary_csv(thickness_files, output_dir):
+def generate_summary_csv(thickness_files, output_dir, settings=None):
     """
     Generate summary CSV file from thickness files.
     
@@ -325,7 +349,7 @@ def generate_summary_csv(thickness_files, output_dir):
     
     for file_path, (thickness_type, folder_name, frame) in thickness_files.items():
         try:
-            stats = inspect_nifti(file_path, return_stats=True, verbose=False)
+            stats = inspect_nifti(file_path, return_stats=True, verbose=False, settings=settings)
             if stats:
                 summary_data.append({
                     'folder_name': folder_name,
@@ -645,9 +669,10 @@ def main():
        python automate_thickness_processing.py -d "path/to/summary_thickness.csv" -o "path/to/output"
     
     example usage (use forward slashes for Windows paths in command line):
-    >>> python automate_thickness_processing.py -mdir "Z:\sandboxes\Jerry\hpc biv-me data\analysis\Tof_44cases_thickness" -o "C:\Users\jchu579\Documents\SRS 2025_26\dev_space\output_thickness"
+    python automate_thickness_processing.py -mdir "Z:\sandboxes\Jerry\hpc biv-me data\analysis\Tof_44cases_thickness" -o "C:\Users\jchu579\Documents\SRS 2025_26\dev_space\output_thickness"
     
-    >>> python automate_thickness_processing.py -d "C:\Users\jchu579\Documents\SRS 2025_26\dev_space\output_thickness\thickness_analysis_20260119_142804\summary_thickness.csv" -o "C:\Users\jchu579\Documents\SRS 2025_26\dev_space\output_thickness"
+    CSV already available, just want to regenerate plots:
+    python automate_thickness_processing.py -d "C:\Users\jchu579\Documents\SRS 2025_26\dev_space\output_thickness\thickness_analysis_20260119_142804\summary_thickness.csv" -o "C:\Users\jchu579\Documents\SRS 2025_26\dev_space\output_thickness"
     """
     # Parse arguments
     args = setup_argparse()
@@ -683,7 +708,7 @@ def main():
         print(f"Found {len(thickness_files)} thickness files")
         
         # Generate summary CSV
-        csv_path, summary_df = generate_summary_csv(thickness_files, output_folder)
+        csv_path, summary_df = generate_summary_csv(thickness_files, output_folder, settings=args)
         
         # Generate individual feature plots
         feature_plots = generate_feature_plots(summary_df, output_folder)
